@@ -37,47 +37,20 @@ function boaBetEventUrl(eventId: number): string {
   return `${BOABET_EVENT_BASE}?champ=${champ}&country=${country}&event=${eventId}&live=0&sport=${sport}&supertip=0`;
 }
 
-// DDI Frame partner-ID for BoaBet (fra devtools-analyse)
-const DDI_PARTNER = "188a1665-3c7b-48aa-a143-6764c719955f";
-const DDI_API     = `https://sport.ddiframe.com/${DDI_PARTNER}`;
-
-/** Hent event-IDer fra DDI Frame API (klient-side — unngår Cloudflare-blokkering).
+/** Hent event-IDer via server-side proxy (unngår CORS mot DDI Frame API).
  *  Returnerer Map<"homeTeam|awayTeam" (lowercase), eventId> */
 async function fetchDDIEventIds(): Promise<Map<string, number>> {
   const map = new Map<string, number>();
-  const { champ, country, sport } = BOABET_ELITESERIEN;
   try {
-    // Prøv kjente DDI Frame API-mønstre
-    const endpoints = [
-      `/api/events?sportId=${sport}&countryId=${country}&champId=${champ}&live=0`,
-      `/api/v2/events?sportId=${sport}&countryId=${country}&champId=${champ}`,
-      `/api/match/list?sport=${sport}&country=${country}&champ=${champ}`,
-    ];
-    for (const ep of endpoints) {
-      try {
-        const res = await fetch(`${DDI_API}${ep}`, {
-          headers: { "Accept": "application/json" },
-          signal: AbortSignal.timeout(3000),
-        });
-        if (!res.ok) continue;
-        const data = await res.json();
-        // Forsøk å parse event-IDer uavhengig av eksakt schema
-        const events: unknown[] = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.data)   ? data.data
-          : Array.isArray(data?.events) ? data.events
-          : Array.isArray(data?.matches)? data.matches
-          : [];
-        for (const ev of events) {
-          if (typeof ev !== "object" || ev === null) continue;
-          const e = ev as Record<string, unknown>;
-          const id    = Number(e.id ?? e.eventId ?? e.matchId);
-          const home  = String(e.homeTeam ?? e.home ?? e.team1 ?? "").toLowerCase();
-          const away  = String(e.awayTeam ?? e.away ?? e.team2 ?? "").toLowerCase();
-          if (id && home && away) map.set(`${home}|${away}`, id);
-        }
-        if (map.size > 0) break; // funnet svar — stopp
-      } catch { continue; }
+    const res = await fetch("/api/ddi-events", {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return map;
+    const data = await res.json() as {
+      events: Array<{ key: string; id: number }>;
+    };
+    for (const { key, id } of data.events ?? []) {
+      if (key && id) map.set(key, id);
     }
   } catch { /* ignore — bruker fallback */ }
   return map;
