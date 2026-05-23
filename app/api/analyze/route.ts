@@ -10,6 +10,7 @@ import { getNationalEloResult } from "@/lib/national-elo";
 import { getTeamStats2026 } from "@/lib/eliteserien-stats";
 import { getTeamInjuryReport, injuryReportToString } from "@/lib/injuries";
 import { getLatestFootballNews, getRecentResults, getTeamRecentForm } from "@/lib/news-feed";
+import { getCongestionFactor } from "@/lib/fixture-congestion";
 
 // Vercel Hobby plan: 10 sek maks — gi hvert kall 3 sek timeout
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -111,6 +112,14 @@ export async function POST(req: NextRequest) {
     // Kombiner ELO-kilder: nasjonal-ELO for VM, club ELO for Eliteserien
     const elo = nationalElo ?? clubElo;
 
+    // Fixture congestion: beregn fatigue fra TheSportsDB-resultater (synkront, ingen kall)
+    const homeCongestion = isEliteserien
+      ? getCongestionFactor(homeTeam, matchDate, recentResults)
+      : null;
+    const awayCongestion = isEliteserien
+      ? getCongestionFactor(awayTeam, matchDate, recentResults)
+      : null;
+
     // Bygg nyhetskontekst fra VG RSS + TheSportsDB form
     const newsLines: string[] = [];
     if (homeNews.length > 0) {
@@ -127,6 +136,13 @@ export async function POST(req: NextRequest) {
       if (homeFormStr !== "Ingen resultater funnet") newsLines.push(`${homeTeam} siste kamper: ${homeFormStr}`);
       if (awayFormStr !== "Ingen resultater funnet") newsLines.push(`${awayTeam} siste kamper: ${awayFormStr}`);
     }
+    // Legg til congestion i kontekst
+    if (homeCongestion || awayCongestion) {
+      newsLines.push(`\nKAMP-TETTHET (siste 7 dager):`);
+      newsLines.push(`  ${homeTeam}: ${homeCongestion?.label ?? "Ukjent"}`);
+      newsLines.push(`  ${awayTeam}: ${awayCongestion?.label ?? "Ukjent"}`);
+    }
+
     const newsStr = newsLines.join("\n");
 
     // Bruk 2026-stats som primær form-kilde for Eliteserien
@@ -139,9 +155,11 @@ export async function POST(req: NextRequest) {
       const eg = expectedGoalsFromForm(
         homeForm.goalsFor, homeForm.goalsAgainst, homeForm.played,
         awayForm.goalsFor, awayForm.goalsAgainst, awayForm.played,
-        1.48,                        // 2026-sesongens faktiske ligasnitt
-        homeForm.form ?? "",         // form-streng for vekting
+        1.48,
+        homeForm.form ?? "",
         awayForm.form ?? "",
+        homeCongestion?.factor ?? 1.0,   // fatigue-koeffisient
+        awayCongestion?.factor ?? 1.0,
       );
       if (eg) poissonPred = poissonPredict(eg.expectedHome, eg.expectedAway);
     }

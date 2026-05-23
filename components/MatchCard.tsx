@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { MatchAnalysis } from "@/lib/analyze";
+import { MatchAnalysis, BetSuggestion } from "@/lib/analyze";
 import { MatchOdds } from "@/lib/odds-api";
 import {
   saveAnalysis,
@@ -10,6 +10,7 @@ import {
 } from "@/lib/analysis-store";
 import { MAX_BOOKMAKER_MARGIN } from "@/lib/odds-api";
 import { getDrawdownStatus, DrawdownStatus } from "@/lib/drawdown";
+import { saveCLVBaseline, updateCLVRefresh } from "@/lib/clv-store";
 
 interface Props {
   homeTeam: string;
@@ -142,6 +143,27 @@ export default function MatchCard({
         odds: data.odds ?? null,
         savedAt: new Date().toISOString(),
       });
+
+      // CLV-tracking: baseline ved første analyse, refresh-oppdatering ved tvungen ny
+      if (!forceRefresh) {
+        saveCLVBaseline(
+          data.analysis.bets.map((bet: BetSuggestion) => ({
+            matchKey,
+            homeTeam,
+            awayTeam,
+            matchDate: date,
+            market: bet.market,
+            bookmaker: bet.bookmaker,
+            oddsAtAnalysis: bet.odds,
+            savedAt: new Date().toISOString(),
+          }))
+        );
+      } else {
+        // Refresh → oppdater CLV med nye odds (closing proxy)
+        data.analysis.bets.forEach((bet: BetSuggestion) => {
+          updateCLVRefresh(matchKey, bet.market, bet.odds);
+        });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Noe gikk galt");
     } finally {

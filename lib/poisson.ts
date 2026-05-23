@@ -95,6 +95,8 @@ export function expectedGoalsFromForm(
   leagueAvg: number = ELITESERIEN_AVG_GOALS,
   homeFormStr: string = "",
   awayFormStr: string = "",
+  homeFatigue: number = 1.0,   // < 1.0 = slitent lag (fixture congestion)
+  awayFatigue: number = 1.0,
 ): { expectedHome: number; expectedAway: number } | null {
   if (homePlayed < 3 || awayPlayed < 3) return null;
 
@@ -109,10 +111,9 @@ export function expectedGoalsFromForm(
   const awayFM = formMultiplier(awayFormStr);
 
   // Hjemmefordel: ~15 % boost basert på Eliteserien-historikk
-  // Forventede mål = (hjemme-angrep × hjemme-form) × (borte-forsvar) × ligasnitt × hjemmefordel
-  const expectedHome = homeAttack * homeFM * awayDefense * leagueAvg * 1.15;
-  // Bortelaget justeres ned litt p.g.a. borteulempe (delt i 1.15-faktoren over)
-  const expectedAway = awayAttack * awayFM * homeDefense * leagueAvg;
+  // fatigue: reduserer angrepsstyrken ved kamp-tetthet (0.90–0.95)
+  const expectedHome = homeAttack * homeFM * homeFatigue * awayDefense * leagueAvg * 1.15;
+  const expectedAway = awayAttack * awayFM * awayFatigue * homeDefense * leagueAvg;
 
   return {
     expectedHome: Math.max(0.3, Math.min(4.0, expectedHome)),

@@ -7,6 +7,7 @@ import {
   SavedAnalysis,
   analysisCount,
 } from "@/lib/analysis-store";
+import { getCLVStats, getCLVEntries, clearCLVEntries, CLVEntry } from "@/lib/clv-store";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("nb-NO", {
@@ -30,8 +31,13 @@ export default function AnalysisHistory() {
   const [analyses, setAnalyses] = useState<SavedAnalysis[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [clvEntries, setCLVEntries] = useState<CLVEntry[]>([]);
+  const [showCLV, setShowCLV] = useState(false);
 
-  const reload = () => setAnalyses(getAllAnalyses());
+  const reload = () => {
+    setAnalyses(getAllAnalyses());
+    setCLVEntries(getCLVEntries());
+  };
 
   useEffect(() => { reload(); }, []);
 
@@ -95,22 +101,95 @@ export default function AnalysisHistory() {
       </div>
 
       {/* Statistikk-rad */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl bg-[#1a1d27] border border-[#2a2d3a] p-3 text-center">
-          <p className="text-2xl font-bold text-white">{analyses.length}</p>
-          <p className="text-xs text-[#64748b]">Analyser totalt</p>
-        </div>
-        <div className="rounded-xl bg-[#1a1d27] border border-[#2a2d3a] p-3 text-center">
-          <p className="text-2xl font-bold text-green-400">{withBets.length}</p>
-          <p className="text-xs text-[#64748b]">Med value-bets</p>
-        </div>
-        <div className="rounded-xl bg-[#1a1d27] border border-[#2a2d3a] p-3 text-center">
-          <p className="text-2xl font-bold text-yellow-400">
-            {analyses.reduce((s, a) => s + a.analysis.bets.length, 0)}
+      {(() => {
+        const clvStats = getCLVStats();
+        return (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-xl bg-[#1a1d27] border border-[#2a2d3a] p-3 text-center">
+              <p className="text-2xl font-bold text-white">{analyses.length}</p>
+              <p className="text-xs text-[#64748b]">Analyser</p>
+            </div>
+            <div className="rounded-xl bg-[#1a1d27] border border-[#2a2d3a] p-3 text-center">
+              <p className="text-2xl font-bold text-green-400">{withBets.length}</p>
+              <p className="text-xs text-[#64748b]">Med value-bets</p>
+            </div>
+            <div className="rounded-xl bg-[#1a1d27] border border-[#2a2d3a] p-3 text-center">
+              <p className="text-2xl font-bold text-yellow-400">
+                {analyses.reduce((s, a) => s + a.analysis.bets.length, 0)}
+              </p>
+              <p className="text-xs text-[#64748b]">Bets foreslått</p>
+            </div>
+            {/* CLV-stat */}
+            <div
+              className="rounded-xl border p-3 text-center cursor-pointer transition-colors
+                border-blue-900 bg-[#0d1225] hover:bg-[#111829]"
+              onClick={() => setShowCLV(!showCLV)}
+              title="Klikk for å se CLV-detaljer"
+            >
+              {clvStats.avgCLV !== null ? (
+                <>
+                  <p className={`text-2xl font-bold ${clvStats.avgCLV >= 0 ? "text-blue-400" : "text-red-400"}`}>
+                    {clvStats.avgCLV >= 0 ? "+" : ""}{clvStats.avgCLV}%
+                  </p>
+                  <p className="text-xs text-[#64748b]">Snitt CLV ({clvStats.withCLV})</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-2xl font-bold text-[#64748b]">—</p>
+                  <p className="text-xs text-[#64748b]">CLV ({clvStats.total} logget)</p>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* CLV-panel */}
+      {showCLV && clvEntries.length > 0 && (
+        <div className="rounded-xl border border-blue-900 bg-[#0d1225] p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-blue-400 font-semibold uppercase tracking-wider">
+              📈 CLV-logg — Closing Line Value
+            </p>
+            <button
+              onClick={() => { clearCLVEntries(); reload(); }}
+              className="text-xs text-red-500 hover:text-red-400"
+            >
+              🗑 Nullstill
+            </button>
+          </div>
+          <p className="text-xs text-[#64748b] mb-3">
+            Positiv CLV = du fikk bedre odds enn markedet senere → tegn på langsiktig edge.
+            Refresher du en analyse, sammenlignes gamle vs nye odds automatisk.
           </p>
-          <p className="text-xs text-[#64748b]">Bets foreslått</p>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {clvEntries.map(e => (
+              <div key={e.id} className="flex items-center justify-between text-xs py-1 border-b border-[#1a2035]">
+                <div className="flex-1 min-w-0">
+                  <span className="text-white font-medium">{e.homeTeam} vs {e.awayTeam}</span>
+                  <span className="text-[#64748b] ml-2">{e.market}</span>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="font-mono text-[#94a3b8]">{e.oddsAtAnalysis.toFixed(2)}</span>
+                  {e.oddsAtRefresh ? (
+                    <>
+                      <span className="text-[#64748b]">→</span>
+                      <span className="font-mono text-[#94a3b8]">{e.oddsAtRefresh.toFixed(2)}</span>
+                      <span className={`font-bold font-mono w-16 text-right ${
+                        (e.clvPct ?? 0) >= 0 ? "text-green-400" : "text-red-400"
+                      }`}>
+                        {(e.clvPct ?? 0) >= 0 ? "+" : ""}{e.clvPct}%
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-[#64748b] font-mono w-24 text-right">venter refresh</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Med value-bets øverst */}
       {withBets.length > 0 && (
