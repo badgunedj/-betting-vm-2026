@@ -43,6 +43,17 @@ const BOOKMAKER_NAMES: Record<string, string> = {
   boabet:    "BoaBet",
 };
 
+// ── BoaBet odds-sjekk ────────────────────────────────────────────────────────
+// Beregn edge med BoaBet sine faktiske odds (tastet inn manuelt)
+function calcBoaBetEdge(ourProbability: number, oddsStr: string) {
+  const o = parseFloat(oddsStr.replace(",", "."));
+  if (isNaN(o) || o <= 1) return null;
+  const impliedProb = 1 / o;
+  const relEdge     = (ourProbability - impliedProb) / impliedProb;
+  const absEdge     = ourProbability - impliedProb;
+  return { relEdge, absEdge, boaOdds: o };
+}
+
 function formatDate(iso: string) {
   const d = new Date(iso);
   return d.toLocaleDateString("nb-NO", {
@@ -85,6 +96,8 @@ export default function MatchCard({
   const [loggedBetIds, setLoggedBetIds] = useState<Set<string>>(new Set());
   // market → CLV% (positiv = odds shortet = sharps inne, negativ = driftet)
   const [movementMap, setMovementMap] = useState<Map<string, number>>(new Map());
+  // market → BoaBet-odds (manuelt tastet inn av bruker for edge-sammenligning)
+  const [boaBetOdds, setBoaBetOdds] = useState<Record<string, string>>({});
 
   // Last inn lagret analyse ved oppstart
   useEffect(() => {
@@ -115,6 +128,20 @@ export default function MatchCard({
     }
     setMovementMap(mvMap);
   }, [analysis, matchKey]);
+
+  // Last inn lagrede BoaBet-odds fra localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`bettingbot_boabet_${matchKey}`);
+      if (stored) setBoaBetOdds(JSON.parse(stored));
+    } catch { /* ignore */ }
+  }, [matchKey]);
+
+  const updateBoaBetOdds = (market: string, value: string) => {
+    const updated = { ...boaBetOdds, [market]: value };
+    setBoaBetOdds(updated);
+    localStorage.setItem(`bettingbot_boabet_${matchKey}`, JSON.stringify(updated));
+  };
 
   async function runAnalysis(forceRefresh = false) {
     // Bruk cache hvis tilgjengelig og ikke tvungen oppdatering
@@ -527,6 +554,62 @@ export default function MatchCard({
                         </p>
                       </div>
                     </div>
+
+                    {/* BoaBet-sammenligning */}
+                    {(() => {
+                      const bResult = calcBoaBetEdge(
+                        bet.ourProbability,
+                        boaBetOdds[bet.market] ?? ""
+                      );
+                      const hasFullValue  = bResult && bResult.relEdge >= 0.05 && bResult.absEdge >= 0.03;
+                      const hasPartialValue = bResult && bResult.relEdge > 0;
+                      return (
+                        <div className="flex items-center gap-2 mb-3 pt-2 border-t border-[#1e2235]">
+                          <a
+                            href="https://play.1-boabet-eu.com"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-amber-400 font-semibold whitespace-nowrap
+                              hover:text-amber-300 transition-colors"
+                            title="Åpne BoaBet"
+                          >
+                            🦁 BoaBet:
+                          </a>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder={`ref ${bet.odds.toFixed(2)}`}
+                            value={boaBetOdds[bet.market] ?? ""}
+                            onChange={e => updateBoaBetOdds(bet.market, e.target.value)}
+                            className="w-24 bg-[#0d0f19] border border-[#2a2d3a] rounded px-2 py-1
+                              text-sm text-white font-mono placeholder-[#3a4060]
+                              focus:outline-none focus:border-amber-500 transition-colors"
+                          />
+                          {bResult ? (
+                            <span className={`text-xs px-2 py-1 rounded font-semibold font-mono flex-1 text-center ${
+                              hasFullValue
+                                ? "bg-green-950 text-green-300 border border-green-800"
+                                : hasPartialValue
+                                ? "bg-yellow-950 text-yellow-300 border border-yellow-800"
+                                : "bg-red-950 text-red-300 border border-red-800"
+                            }`}>
+                              {hasFullValue ? "✅" : hasPartialValue ? "⚠️" : "❌"}{" "}
+                              {bResult.relEdge > 0 ? "+" : ""}
+                              {(bResult.relEdge * 100).toFixed(1)}% edge
+                              {bResult.boaOdds > bet.odds
+                                ? " · 🔼 bedre enn ref"
+                                : bResult.boaOdds < bet.odds
+                                ? " · 🔽 dårligere enn ref"
+                                : ""}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-[#3a4060] flex-1">
+                              tast inn BoaBet-odds for å sjekke edge
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     <div className="flex gap-2">
                       <a
