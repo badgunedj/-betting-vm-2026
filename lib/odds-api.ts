@@ -22,7 +22,11 @@ export interface MatchOdds {
   bestOver25: { odds: number; bookmaker: string } | null;
 }
 
-const BOOKMAKERS = ["nordicbet", "unibet", "betsson", "pinnacle"];
+// Bookmakers tilgjengelig for norske spillere (oppdatert mai 2026)
+// Unibet: forlot Norge nov. 2024 | Pinnacle: blokkert i Norge
+// NordicBet + Betsson (Betsson Group) er fortsatt tilgjengelig
+// Betway: internasjonalt, godtar norske spillere
+const BOOKMAKERS = ["nordicbet", "betsson", "betway", "pinnacle"];
 
 // Beregn implisitt sannsynlighet (fjern margin)
 export function impliedProbability(odds: number): number {

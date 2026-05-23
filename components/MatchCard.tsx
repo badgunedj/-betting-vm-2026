@@ -18,16 +18,19 @@ interface Props {
 
 const BOOKMAKER_LINKS: Record<string, string> = {
   nordicbet: "https://www.nordicbet.com",
-  unibet: "https://www.unibet.com",
-  betsson: "https://www.betsson.com",
-  pinnacle: "https://www.pinnacle.com",
+  betsson:   "https://www.betsson.com/nb",
+  betway:    "https://www.betway.com",
+  pinnacle:  "https://www.pinnacle.com",
+  // Anbefalte norske alternativer (ikke i odds-API men gode for å plassere bet)
+  boabet:    "https://www.boabet.com",
 };
 
 const BOOKMAKER_NAMES: Record<string, string> = {
   nordicbet: "NordicBet",
-  unibet: "Unibet",
-  betsson: "Betsson",
-  pinnacle: "Pinnacle",
+  betsson:   "Betsson",
+  betway:    "Betway",
+  pinnacle:  "Pinnacle",
+  boabet:    "BoaBet",
 };
 
 function formatDate(iso: string) {
