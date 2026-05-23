@@ -29,6 +29,134 @@ function ConfBadge({ c }: { c: string }) {
   return <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold">LAV</span>;
 }
 
+// ── Bankroll-kurve ────────────────────────────────────────────────────────────
+const LS_START_KEY = "bettingbot_start_bankroll_v1";
+
+function BankrollChart({
+  startBankroll,
+  bets,
+}: {
+  startBankroll: number;
+  bets: BetResult[];
+}) {
+  const resolved = [...bets]
+    .filter(r => r.outcome !== "pending" && r.resolvedAt)
+    .sort((a, b) => new Date(a.resolvedAt!).getTime() - new Date(b.resolvedAt!).getTime());
+
+  if (resolved.length < 2) return null;
+
+  // Bygg kumulativ bankroll-serie
+  const series: { bankroll: number; outcome: string }[] = [];
+  let bankroll = startBankroll;
+  series.push({ bankroll, outcome: "start" });
+  for (const r of resolved) {
+    bankroll += r.profit ?? 0;
+    series.push({ bankroll, outcome: r.outcome ?? "void" });
+  }
+
+  // High watermark og max drawdown
+  let peak = startBankroll;
+  let maxDrawdownPct = 0;
+  for (const pt of series) {
+    if (pt.bankroll > peak) peak = pt.bankroll;
+    const dd = peak > 0 ? ((peak - pt.bankroll) / peak) * 100 : 0;
+    if (dd > maxDrawdownPct) maxDrawdownPct = dd;
+  }
+  const currentBankroll = series[series.length - 1].bankroll;
+
+  // SVG-dimensjoner
+  const W = 500, H = 130;
+  const PAD = { top: 14, bottom: 22, left: 44, right: 14 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+
+  const yVals = series.map(p => p.bankroll);
+  const minY = Math.min(...yVals, startBankroll);
+  const maxY = Math.max(...yVals, startBankroll);
+  const yRange = maxY - minY || 100;
+
+  const toX = (i: number) => PAD.left + (series.length > 1 ? (i / (series.length - 1)) * plotW : 0);
+  const toY = (v: number) => PAD.top + plotH - ((v - minY) / yRange) * plotH;
+
+  const linePoints = series.map((p, i) => `${toX(i).toFixed(1)},${toY(p.bankroll).toFixed(1)}`);
+  const linePath   = `M ${linePoints.join(" L ")}`;
+  const refY       = toY(startBankroll);
+  const lineColor  = currentBankroll >= startBankroll ? "#818cf8" : "#f87171";
+
+  // 3 y-akse-tickmarks
+  const ticks = [minY, (minY + maxY) / 2, maxY];
+  const fmtKr = (v: number) => v >= 10000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0);
+
+  const dotFill = (o: string) =>
+    o === "won" ? "#4ade80" : o === "lost" ? "#f87171" : "#94a3b8";
+
+  return (
+    <div className="mb-3">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full rounded-lg bg-[#0d0d1a]"
+        style={{ height: 130 }}
+        aria-label="Bankroll-kurve"
+      >
+        {/* Grid + y-akse */}
+        {ticks.map((v, i) => {
+          const y = toY(v);
+          return (
+            <g key={i}>
+              <line x1={PAD.left} y1={y} x2={PAD.left + plotW} y2={y}
+                stroke="#1a1d2e" strokeWidth="1" />
+              <text x={PAD.left - 4} y={y + 3.5} textAnchor="end"
+                fontSize="9" fill="#475569">{fmtKr(v)}</text>
+            </g>
+          );
+        })}
+
+        {/* Startlinje (stiplet) */}
+        <line
+          x1={PAD.left} y1={refY} x2={PAD.left + plotW} y2={refY}
+          stroke="#7c3aed" strokeWidth="1" strokeDasharray="4 3" opacity="0.45"
+        />
+
+        {/* Linje */}
+        <path d={linePath} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" />
+
+        {/* Prikker for hvert bet */}
+        {series.map((p, i) =>
+          i > 0 ? (
+            <circle
+              key={i}
+              cx={toX(i).toFixed(1)} cy={toY(p.bankroll).toFixed(1)}
+              r="3" fill={dotFill(p.outcome)} stroke="#0d0d1a" strokeWidth="1"
+            />
+          ) : null
+        )}
+      </svg>
+
+      {/* Stats under grafen */}
+      <div className="grid grid-cols-3 gap-2 mt-2 text-center text-xs">
+        <div>
+          <p className={`font-bold font-mono ${currentBankroll >= startBankroll ? "text-green-400" : "text-red-400"}`}>
+            {currentBankroll.toFixed(0)} kr
+          </p>
+          <p className="text-[#64748b]">Bankroll nå</p>
+        </div>
+        <div>
+          <p className="font-bold font-mono text-blue-400">{peak.toFixed(0)} kr</p>
+          <p className="text-[#64748b]">Topp</p>
+        </div>
+        <div>
+          <p className={`font-bold font-mono ${
+            maxDrawdownPct > 20 ? "text-red-400" : maxDrawdownPct > 10 ? "text-orange-400" : "text-yellow-400"
+          }`}>
+            -{maxDrawdownPct.toFixed(1)}%
+          </p>
+          <p className="text-[#64748b]">Max drawdown</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AnalysisHistory() {
   const [analyses, setAnalyses] = useState<SavedAnalysis[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -40,6 +168,8 @@ export default function AnalysisHistory() {
   const [showResults, setShowResults] = useState(false);
   const [calibration, setCalibration] = useState<CalibrationStats | null>(null);
   const [showCalibration, setShowCalibration] = useState(false);
+  const [startBankroll, setStartBankroll] = useState(5000);
+  const [editStart, setEditStart] = useState(false);
 
   const reload = () => {
     setAnalyses(getAllAnalyses());
@@ -50,7 +180,15 @@ export default function AnalysisHistory() {
     setCalibration(computeCalibration());
   };
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    reload();
+    // Last startBankroll fra localStorage ved oppstart
+    const stored = localStorage.getItem(LS_START_KEY);
+    if (stored) {
+      const val = parseInt(stored, 10);
+      if (!isNaN(val) && val > 0) setStartBankroll(val);
+    }
+  }, []);
 
   function handleDelete(key: string) {
     deleteAnalysis(key);
@@ -290,6 +428,46 @@ export default function AnalysisHistory() {
                 </p>
                 <p className="text-xs text-[#64748b]">NOK</p>
               </div>
+            </div>
+          )}
+
+          {/* Bankroll-kurve — vises når ≥2 bets er avgjort */}
+          {betResults.filter(r => r.outcome !== "pending").length >= 2 && (
+            <div className="mb-2">
+              {/* Redigerbar startbankroll */}
+              <div className="flex items-center gap-2 mb-2 text-xs text-[#64748b]">
+                <span>Start:</span>
+                {editStart ? (
+                  <input
+                    type="number"
+                    className="w-24 bg-[#1a1d27] border border-purple-700 rounded px-2 py-0.5
+                      text-white text-xs focus:outline-none"
+                    value={startBankroll}
+                    onChange={e => setStartBankroll(Number(e.target.value))}
+                    onBlur={() => {
+                      localStorage.setItem(LS_START_KEY, String(startBankroll));
+                      setEditStart(false);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") {
+                        localStorage.setItem(LS_START_KEY, String(startBankroll));
+                        setEditStart(false);
+                      }
+                    }}
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    className="font-mono text-purple-400 hover:text-purple-300 underline decoration-dotted"
+                    onClick={() => setEditStart(true)}
+                    title="Klikk for å endre startbankroll"
+                  >
+                    {startBankroll.toLocaleString("nb-NO")} kr
+                  </button>
+                )}
+                <span className="text-[#475569]">· klikk for å endre</span>
+              </div>
+              <BankrollChart startBankroll={startBankroll} bets={betResults} />
             </div>
           )}
 
