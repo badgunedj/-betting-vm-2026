@@ -28,19 +28,18 @@ interface Props {
 
 // BoaBet URL-struktur (fra devtools):
 //   Kamp-side:  /event-details?champ=5106&country=1388&event=EVENT_ID&live=0&sport=1&supertip=0
-//   Liga-side:  /pre-match?champ=5106&country=1388&sport=1&live=0
-const BOABET_EVENT_BASE  = "https://play.1-boabet-eu.com/en/sports/sportsbook/event-details";
-const BOABET_LEAGUE_BASE = "https://play.1-boabet-eu.com/en/sports/sportsbook/pre-match";
+//   NB: SPA prosesserer ikke champ/country-params via ekstern navigasjon — kun event-ID fungerer
+const BOABET_EVENT_BASE = "https://play.1-boabet-eu.com/en/sports/sportsbook/event-details";
+const BOABET_HOME       = "https://play.1-boabet-eu.com/en/sports/sportsbook/";
 // champ=5106 = Eliteserien 2026 · country=1388 = Norge · sport=1 = fotball
 function boaBetUrl(sport: string, eventId?: number | null): string {
   if (sport === "eliteserien" || sport === "soccer_norway_eliteserien") {
     if (eventId) {
       return `${BOABET_EVENT_BASE}?champ=5106&country=1388&event=${eventId}&live=0&sport=1&supertip=0`;
     }
-    return `${BOABET_LEAGUE_BASE}?champ=5106&country=1388&sport=1&live=0`;
   }
-  // VM 2026 — liga-siden uten deep-link (champ/country-IDer ikke verifisert)
-  return `${BOABET_LEAGUE_BASE}`;
+  // Fallback: plain sportsbook home — SPA-ens pre-match-side håndterer ikke URL-params eksternt
+  return BOABET_HOME;
 }
 
 const BOOKMAKER_LINKS: Record<string, string> = {
@@ -48,7 +47,7 @@ const BOOKMAKER_LINKS: Record<string, string> = {
   betsson:   "https://www.betsson.com/nb",
   betway:    "https://www.betway.com",
   pinnacle:  "https://www.pinnacle.com",
-  boabet:    BOABET_LEAGUE_BASE,
+  boabet:    BOABET_HOME,
 };
 
 const BOOKMAKER_NAMES: Record<string, string> = {

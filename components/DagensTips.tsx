@@ -23,13 +23,12 @@ const BOABET_ELITESERIEN = {
   sport:   1,
 } as const;
 
-const BOABET_EVENT_BASE  = "https://play.1-boabet-eu.com/en/sports/sportsbook/event-details";
-const BOABET_LEAGUE_BASE = "https://play.1-boabet-eu.com/en/sports/sportsbook/pre-match";
+const BOABET_EVENT_BASE = "https://play.1-boabet-eu.com/en/sports/sportsbook/event-details";
+const BOABET_HOME       = "https://play.1-boabet-eu.com/en/sports/sportsbook/";
 
-/** Fallback: åpner Eliteserien-siden på BoaBet (alle kamper synlig) */
-function boaBetLeagueUrl(): string {
-  const { champ, country, sport } = BOABET_ELITESERIEN;
-  return `${BOABET_LEAGUE_BASE}?champ=${champ}&country=${country}&sport=${sport}&live=0`;
+/** Fallback: åpner BoaBet sportsbooksiden (SPA prosesserer ikke champ/country-params fra ekstern nav) */
+function boaBetHomeUrl(): string {
+  return BOABET_HOME;
 }
 
 /** Presis kamp-URL hvis vi kjenner event-ID */
@@ -298,11 +297,11 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                     </div>
                     {(() => {
                       const eventId = findEventId(bet.homeTeam, bet.awayTeam, eventMap);
-                      const href    = eventId ? boaBetEventUrl(eventId) : boaBetLeagueUrl();
+                      const href    = eventId ? boaBetEventUrl(eventId) : boaBetHomeUrl();
                       const label   = eventId ? "🦁 Bet direkte →" : "🦁 BoaBet →";
                       const title   = eventId
                         ? `Åpner kamp-siden direkte · ref-odds ${bet.odds.toFixed(2)} (${BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker})`
-                        : `Åpner Eliteserien-siden · ref-odds ${bet.odds.toFixed(2)} (${BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker})`;
+                        : `Søk etter «${bet.homeTeam} – ${bet.awayTeam}» på BoaBet`;
                       return (
                         <div className="flex flex-col items-end gap-1">
                           <a
@@ -318,7 +317,8 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                           <span className="text-[10px] text-[#64748b] whitespace-nowrap">
                             {eventId
                               ? <span className="text-green-500">✓ kamp funnet</span>
-                              : "Finn kampen på siden"}
+                              : <span className="text-amber-500">Søk: {bet.homeTeam.split(" ").pop()} – {bet.awayTeam.split(" ").pop()}</span>
+                            }
                             {" · "}{bet.odds.toFixed(2)} ref
                           </span>
                         </div>
