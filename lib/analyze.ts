@@ -61,8 +61,10 @@ export async function analyzeMatch(
   const mktHome = avgHome / total;
   const mktDraw = avgDraw / total;
   const mktAway = avgAway / total;
-  const mktOver  = odds.bestOver25  ? (1 / odds.bestOver25.odds)  : null;
-  const mktUnder = odds.bestUnder25 ? (1 / odds.bestUnder25.odds) : null;
+  const mktOver    = odds.bestOver25   ? (1 / odds.bestOver25.odds)   : null;
+  const mktUnder   = odds.bestUnder25  ? (1 / odds.bestUnder25.odds)  : null;
+  const mktBttsYes = odds.bestBttsYes  ? (1 / odds.bestBttsYes.odds)  : null;
+  const mktBttsNo  = odds.bestBttsNo   ? (1 / odds.bestBttsNo.odds)   : null;
 
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
@@ -179,7 +181,8 @@ ${topSignal}
 ═══ STATISTISKE MODELLER ═══${poissonSection}${eloSection}${pinnacleSection}
 
 ═══ MARKEDETS KONSENSUS (uten bookmaker-margin) ═══
-- Hjemmeseier: ${pct(mktHome)} | Uavgjort: ${pct(mktDraw)} | Borteseier: ${pct(mktAway)}${mktOver ? ` | Over 2.5: ${pct(mktOver)}` : ""}${mktUnder ? ` | Under 2.5: ${pct(mktUnder)}` : ""}
+- Hjemmeseier: ${pct(mktHome)} | Uavgjort: ${pct(mktDraw)} | Borteseier: ${pct(mktAway)}${mktOver ? ` | Over 2.5: ${pct(mktOver)}` : ""}${mktUnder ? ` | Under 2.5: ${pct(mktUnder)}` : ""}${mktBttsYes ? ` | BTTS Ja: ${pct(mktBttsYes)}` : ""}${mktBttsNo ? ` | BTTS Nei: ${pct(mktBttsNo)}` : ""}
+- Poisson BTTS: ${poisson ? `Ja=${pct(poisson.bttsYes)} / Nei=${pct(poisson.bttsNo)}` : "N/A"}
 
 ═══ LAGFORM (sesong 2026) ═══
 - ${homeTeam}: ${formStr(homeForm)}
@@ -278,6 +281,13 @@ Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
       : []),
     ...(odds.bestUnder25
       ? [{ market: "Under 2.5 mål", ourProb: prob.under25 ?? (1 - prob.over25), odds: odds.bestUnder25.odds, bookmaker: odds.bestUnder25.bookmaker, isDraw: false }]
+      : []),
+    // BTTS: Poisson-sannsynlighet er ren matematikk — brukes direkte uten AI-justering
+    ...(odds.bestBttsYes && poisson
+      ? [{ market: "BTTS Ja",  ourProb: poisson.bttsYes, odds: odds.bestBttsYes.odds, bookmaker: odds.bestBttsYes.bookmaker, isDraw: false }]
+      : []),
+    ...(odds.bestBttsNo && poisson
+      ? [{ market: "BTTS Nei", ourProb: poisson.bttsNo,  odds: odds.bestBttsNo.odds,  bookmaker: odds.bestBttsNo.bookmaker,  isDraw: false }]
       : []),
   ];
 

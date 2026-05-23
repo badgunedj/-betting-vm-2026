@@ -8,6 +8,8 @@ export interface BookmakerOdds {
   awayWin: number;
   over25: number | null;
   under25: number | null;
+  bttsYes: number | null;
+  bttsNo:  number | null;
 }
 
 // Pinnacle har verdens laveste margin (~4-5%) og regnes som "sann pris" av profesjonelle
@@ -31,8 +33,10 @@ export interface MatchOdds {
   bestHomeWin: { odds: number; bookmaker: string };
   bestDraw: { odds: number; bookmaker: string };
   bestAwayWin: { odds: number; bookmaker: string };
-  bestOver25:  { odds: number; bookmaker: string } | null;
-  bestUnder25: { odds: number; bookmaker: string } | null;
+  bestOver25:   { odds: number; bookmaker: string } | null;
+  bestUnder25:  { odds: number; bookmaker: string } | null;
+  bestBttsYes:  { odds: number; bookmaker: string } | null;
+  bestBttsNo:   { odds: number; bookmaker: string } | null;
   pinnacleRef: PinnacleRef | null;   // null hvis Pinnacle ikke har odds for kampen
 }
 
@@ -81,8 +85,8 @@ export function kellyStake(
 export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
   const bookmakerList = BOOKMAKERS.join(",");
 
-  // Hent 1X2 odds
-  const [h2hRes, totalsRes] = await Promise.all([
+  // Hent 1X2 + totals + BTTS parallelt
+  const [h2hRes, totalsRes, bttsRes] = await Promise.all([
     fetch(
       `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=h2h&bookmakers=${bookmakerList}&oddsFormat=decimal`,
       { next: { revalidate: 900 } } // cache 15 min
@@ -91,11 +95,16 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=totals&bookmakers=${bookmakerList}&oddsFormat=decimal`,
       { next: { revalidate: 900 } }
     ),
+    fetch(
+      `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=btts&bookmakers=${bookmakerList}&oddsFormat=decimal`,
+      { next: { revalidate: 900 } }
+    ),
   ]);
 
-  const [h2hData, totalsData] = await Promise.all([
+  const [h2hData, totalsData, bttsData] = await Promise.all([
     h2hRes.json(),
     totalsRes.json(),
+    bttsRes.json(),
   ]);
 
   if (!Array.isArray(h2hData)) return [];
@@ -116,6 +125,28 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
     }
   }
 
+  // Bygg BTTS-map: beste "Ja"- og "Nei"-odds per kamp på tvers av bookmakers
+  const bttsYesMap = new Map<string, { odds: number; bookmaker: string }>();
+  const bttsNoMap  = new Map<string, { odds: number; bookmaker: string }>();
+  if (Array.isArray(bttsData)) {
+    for (const event of bttsData) {
+      for (const bk of event.bookmakers ?? []) {
+        const market = bk.markets?.find((m: { key: string }) => m.key === "bts");
+        if (!market) continue;
+        const yes = market.outcomes?.find((o: { name: string }) => o.name === "Yes")?.price;
+        const no  = market.outcomes?.find((o: { name: string }) => o.name === "No")?.price;
+        if (yes) {
+          const cur = bttsYesMap.get(event.id);
+          if (!cur || yes > cur.odds) bttsYesMap.set(event.id, { odds: yes, bookmaker: bk.key });
+        }
+        if (no) {
+          const cur = bttsNoMap.get(event.id);
+          if (!cur || no > cur.odds) bttsNoMap.set(event.id, { odds: no, bookmaker: bk.key });
+        }
+      }
+    }
+  }
+
   return h2hData.map((event) => {
     const bookmakers: BookmakerOdds[] = [];
     const totals = totalsMap.get(event.id);
@@ -129,13 +160,18 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       const draw = outcomes.find((o: { name: string }) => o.name === "Draw")?.price;
       if (!home || !away) continue;
 
+      // BTTS-odds er event-nivå (beste på tvers av bookmakers) — vises i alle rader
+      const bestYes = bttsYesMap.get(event.id);
+      const bestNo  = bttsNoMap.get(event.id);
       bookmakers.push({
         bookmaker: bk.key,
         homeWin: home,
         draw: draw ?? 0,
         awayWin: away,
-        over25: totals?.over ?? null,
+        over25:  totals?.over ?? null,
         under25: totals?.under ?? null,
+        bttsYes: bestYes ? bestYes.odds : null,
+        bttsNo:  bestNo  ? bestNo.odds  : null,
       });
     }
 
@@ -195,8 +231,10 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       bestHomeWin: best("homeWin"),
       bestDraw: best("draw"),
       bestAwayWin: best("awayWin"),
-      bestOver25:  totals ? { odds: totals.over,  bookmaker: totals.bk } : null,
-      bestUnder25: bestUnder,
+      bestOver25:   totals ? { odds: totals.over, bookmaker: totals.bk } : null,
+      bestUnder25:  bestUnder,
+      bestBttsYes:  bttsYesMap.get(event.id) ?? null,
+      bestBttsNo:   bttsNoMap.get(event.id)  ?? null,
       pinnacleRef,
     };
   });

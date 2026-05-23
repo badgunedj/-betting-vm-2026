@@ -229,6 +229,8 @@ export default function MatchCard({
                   <th className="text-center pb-2">X</th>
                   <th className="text-center pb-2">2 (Borte)</th>
                   <th className="text-center pb-2">O2.5</th>
+                  <th className="text-center pb-2">BTTS Ja</th>
+                  <th className="text-center pb-2">BTTS Nei</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#2a2d3a]">
@@ -258,6 +260,12 @@ export default function MatchCard({
                       </td>
                       <td className={`text-center py-2 font-mono ${bk.over25 === odds.bestOver25?.odds && !isPinnacle ? "text-green-400 font-bold" : isPinnacle ? "text-blue-300" : ""}`}>
                         {bk.over25 ? bk.over25.toFixed(2) : "-"}
+                      </td>
+                      <td className={`text-center py-2 font-mono ${isPinnacle ? "text-blue-300" : "text-[#94a3b8]"}`}>
+                        {bk.bttsYes ? bk.bttsYes.toFixed(2) : "-"}
+                      </td>
+                      <td className={`text-center py-2 font-mono ${isPinnacle ? "text-blue-300" : "text-[#94a3b8]"}`}>
+                        {bk.bttsNo ? bk.bttsNo.toFixed(2) : "-"}
                       </td>
                     </tr>
                   );

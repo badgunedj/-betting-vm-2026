@@ -16,6 +16,8 @@ export interface PoissonPrediction {
   awayWin: number;
   over25: number;
   under25: number;
+  bttsYes: number;  // P(hjemme ≥1) × P(borte ≥1) = (1−e^−λH)(1−e^−λA)
+  bttsNo: number;
   expectedHomeGoals: number;
   expectedAwayGoals: number;
 }
@@ -44,12 +46,17 @@ export function poissonPredict(
   draw    /= total;
   awayWin /= total;
 
+  // BTTS: P(hjemme score≥1) × P(borte score≥1) — én linje Poisson-matte
+  const bttsYes = (1 - Math.exp(-expectedHomeGoals)) * (1 - Math.exp(-expectedAwayGoals));
+
   return {
     homeWin,
     draw,
     awayWin,
     over25,
     under25: 1 - over25,
+    bttsYes,
+    bttsNo: 1 - bttsYes,
     expectedHomeGoals,
     expectedAwayGoals,
   };
