@@ -133,12 +133,15 @@ export async function POST(req: NextRequest) {
     const homeForm = homeFormFromStats;
     const awayForm = awayFormFromStats;
 
-    // Poisson-modell fra 2026-sesongstatistikk
+    // Poisson-modell fra 2026-sesongstatistikk (med form-vekting)
     let poissonPred = null;
     if (homeForm && awayForm && homeForm.played >= 3 && awayForm.played >= 3) {
       const eg = expectedGoalsFromForm(
         homeForm.goalsFor, homeForm.goalsAgainst, homeForm.played,
-        awayForm.goalsFor, awayForm.goalsAgainst, awayForm.played
+        awayForm.goalsFor, awayForm.goalsAgainst, awayForm.played,
+        1.48,                        // 2026-sesongens faktiske ligasnitt
+        homeForm.form ?? "",         // form-streng for vekting
+        awayForm.form ?? "",
       );
       if (eg) poissonPred = poissonPredict(eg.expectedHome, eg.expectedAway);
     }

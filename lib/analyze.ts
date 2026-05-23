@@ -47,15 +47,21 @@ export async function analyzeMatch(
 ): Promise<MatchAnalysis> {
 
   // ── Bookmaker-konsensus (fjern margin) ──
-  const bkProbs = odds.bookmakers.slice(0, 3).filter(b => b.homeWin > 1 && b.awayWin > 1);
-  const avgHome = bkProbs.reduce((s, b) => s + 1 / b.homeWin, 0) / (bkProbs.length || 1);
-  const avgDraw = bkProbs.reduce((s, b) => s + 1 / b.draw,    0) / (bkProbs.length || 1);
-  const avgAway = bkProbs.reduce((s, b) => s + 1 / b.awayWin, 0) / (bkProbs.length || 1);
-  const total = avgHome + avgDraw + avgAway;
-  const mktHome = (avgHome / total);
-  const mktDraw = (avgDraw / total);
-  const mktAway = (avgAway / total);
-  const mktOver = odds.bestOver25 ? (1 / odds.bestOver25.odds) : null;
+  // KRITISK: filtrer bort bookmakers med draw=0 (unngå 1/0=Infinity som ødelegger alt)
+  const bkProbs = odds.bookmakers
+    .slice(0, 5)
+    .filter(b => b.homeWin > 1 && b.awayWin > 1 && b.draw > 0);
+
+  const safeLen = bkProbs.length || 1;
+  const avgHome = bkProbs.reduce((s, b) => s + 1 / b.homeWin, 0) / safeLen;
+  const avgDraw = bkProbs.reduce((s, b) => s + 1 / b.draw,    0) / safeLen;
+  const avgAway = bkProbs.reduce((s, b) => s + 1 / b.awayWin, 0) / safeLen;
+  const total   = avgHome + avgDraw + avgAway || 1; // guard mot 0
+  const mktHome = avgHome / total;
+  const mktDraw = avgDraw / total;
+  const mktAway = avgAway / total;
+  const mktOver  = odds.bestOver25  ? (1 / odds.bestOver25.odds)  : null;
+  const mktUnder = odds.bestUnder25 ? (1 / odds.bestUnder25.odds) : null;
 
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
@@ -74,12 +80,23 @@ export async function analyzeMatch(
     .map(bk => `${bk.bookmaker}: 1=${bk.homeWin} X=${bk.draw > 0 ? bk.draw : "-"} 2=${bk.awayWin}`)
     .join("\n");
 
-  // ── Poisson-seksjon ──
-  const poissonSection = poisson
-    ? `\nPOISSON-MODELL (statistisk, basert på sesongform):
+  // ── Poisson-seksjon + eksplisitt avvik fra marked ──
+  const poissonSection = poisson ? (() => {
+    const homeEdge = ((poisson.homeWin - mktHome) * 100).toFixed(1);
+    const drawEdge = ((poisson.draw    - mktDraw) * 100).toFixed(1);
+    const awayEdge = ((poisson.awayWin - mktAway) * 100).toFixed(1);
+    const overEdge = mktOver ? ((poisson.over25  - mktOver)  * 100).toFixed(1) : null;
+    const flagHome = Math.abs(poisson.homeWin - mktHome) >= 0.05 ? (poisson.homeWin > mktHome ? " ⬆️ MODELL OVER MARKED" : " ⬇️ MODELL UNDER MARKED") : "";
+    const flagAway = Math.abs(poisson.awayWin - mktAway) >= 0.05 ? (poisson.awayWin > mktAway ? " ⬆️ MODELL OVER MARKED" : " ⬇️ MODELL UNDER MARKED") : "";
+    const flagOver = overEdge && Math.abs(poisson.over25 - (mktOver ?? 0)) >= 0.05 ? (poisson.over25 > (mktOver ?? 0) ? " ⬆️ MODELL OVER" : " ⬇️ MODELL UNDER") : "";
+    return `\nPOISSON-MODELL (form-vektet, ligasnitt 1.48 mål/lag):
 - Forventede mål: Hjemme ${poisson.expectedHomeGoals.toFixed(2)} | Borte ${poisson.expectedAwayGoals.toFixed(2)}
-- Modell-sannsynligheter: Hjemme ${pct(poisson.homeWin)} | Uavgjort ${pct(poisson.draw)} | Borte ${pct(poisson.awayWin)} | Over 2.5: ${pct(poisson.over25)}`
-    : "";
+- Modell vs Marked:
+  Hjemme: ${pct(poisson.homeWin)} vs ${pct(mktHome)} (avvik: ${Number(homeEdge) > 0 ? "+" : ""}${homeEdge}pp)${flagHome}
+  Uavgjort: ${pct(poisson.draw)} vs ${pct(mktDraw)} (avvik: ${Number(drawEdge) > 0 ? "+" : ""}${drawEdge}pp)${flagAway}
+  Borte: ${pct(poisson.awayWin)} vs ${pct(mktAway)} (avvik: ${Number(awayEdge) > 0 ? "+" : ""}${awayEdge}pp)${flagAway}
+  Over 2.5: ${pct(poisson.over25)} vs ${mktOver ? pct(mktOver) : "N/A"} (avvik: ${overEdge ? (Number(overEdge) > 0 ? "+" : "") + overEdge + "pp" : "N/A"})${flagOver}`;
+  })() : "";
 
   // ── ELO-seksjon ──
   const hasNationalElo = elo?.homeElo && elo?.awayElo && !poisson; // VM = ingen Poisson
@@ -106,16 +123,30 @@ export async function analyzeMatch(
     ? `\n═══ SISTE NYHETER OG KONTEKST ═══\n${newsStr}`
     : "";
 
-  const hasGoodData = poisson !== null || elo?.homeElo !== null;
+  const hasGoodData = poisson !== null || (elo?.homeElo != null);
 
-  const prompt = `Du er en profesjonell fotballanalytiker og value-better med fokus på norsk Eliteserien og VM 2026.
+  // Pre-compute sterkeste signal (for prompt-highlight)
+  const topSignal = (() => {
+    if (!poisson) return "";
+    const signals: { label: string; diff: number }[] = [
+      { label: `Hjemmeseier (${pct(poisson.homeWin)} vs ${pct(mktHome)})`, diff: poisson.homeWin - mktHome },
+      { label: `Uavgjort (${pct(poisson.draw)} vs ${pct(mktDraw)})`,       diff: poisson.draw    - mktDraw },
+      { label: `Borteseier (${pct(poisson.awayWin)} vs ${pct(mktAway)})`,  diff: poisson.awayWin - mktAway },
+    ];
+    const best = signals.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))[0];
+    if (Math.abs(best.diff) < 0.04) return "";
+    return `\n⚡ STERKESTE SIGNAL: ${best.label} — modell ${best.diff > 0 ? "HØYERE" : "LAVERE"} enn marked med ${Math.abs(best.diff * 100).toFixed(1)}pp`;
+  })();
+
+  const prompt = `Du er en kvantitativ fotballanalytiker. Du estimerer RIKTIGE sannsynligheter og identifiserer value.
 
 KAMP: ${homeTeam} vs ${awayTeam}
+${topSignal}
 
 ═══ STATISTISKE MODELLER ═══${poissonSection}${eloSection}
 
 ═══ MARKEDETS KONSENSUS (uten bookmaker-margin) ═══
-- Hjemmeseier: ${pct(mktHome)} | Uavgjort: ${pct(mktDraw)} | Borteseier: ${pct(mktAway)}${mktOver ? ` | Over 2.5: ${pct(mktOver)}` : ""}
+- Hjemmeseier: ${pct(mktHome)} | Uavgjort: ${pct(mktDraw)} | Borteseier: ${pct(mktAway)}${mktOver ? ` | Over 2.5: ${pct(mktOver)}` : ""}${mktUnder ? ` | Under 2.5: ${pct(mktUnder)}` : ""}
 
 ═══ LAGFORM (sesong 2026) ═══
 - ${homeTeam}: ${formStr(homeForm)}
@@ -130,30 +161,28 @@ ${oddsStr}
 
 ═══ INSTRUKSJONER ═══
 ${hasGoodData
-  ? `1. Poisson-modellen og ELO gir et objektivt startpunkt — bruk disse som primærreferanse
-2. Juster for skader, form-trend og H2H (maks ±8 prosentpoeng fra Poisson/ELO)
-3. Marker høy konfidensHVIS Poisson/ELO og markedet er enige og du ser edge`
-  : `1. Markedskonsensus er ankerpunktet — avvik krever sterk begrunnelse
-2. Juster kun 2-5 prosentpoeng uten konkrete data
-3. Uten god data: vær svært konservativ`}
-4. Anbefal KUN bets der din sannsynlighet er minst 5% høyere enn markedets implisitte
-5. Vær konservativ — ingen bet er bedre enn et dårlig bet
+  ? `POISSON-MODELLEN er ditt primære anker — den er basert på faktiske 2026-sesongdata.
+1. Aksepter Poisson-tallene med mindre du har en KONKRET grunn til å avvike (skader, suspensjon av nøkkelspiller, ekstremt H2H).
+2. Maksimal justering fra Poisson: ±6 prosentpoeng per utfall — ikke mer.
+3. Skader teller: Keeper ute = -3pp hjemme-sannsynlighet. 5+ spillere ute = -5pp.
+4. HØY konfidensHVIS: Poisson + ELO peker samme retning OG avviket vs markedet er ≥5pp.`
+  : `Markedskonsensus er ankerpunkt — avvik krever konkret begrunnelse. Maks ±4pp justering.`}
+5. For Over/Under 2.5: bruk Poisson direkte (expected goals er vist ovenfor).
+6. IKKE anbefal bet bare fordi modellen sier det — sjekk om skader/vær overrider.
+7. Svar STRIKT i JSON-formatet under — ingen ekstra tekst.
 
-Trinn 1: Sammenlign Poisson/ELO med markedspriser — er det en divergens?
-Trinn 2: Juster for skader og aktuelle form-trend (siste 3-4 kamper)
-Trinn 3: Gi din endelige vurdering
-
-Svar KUN i dette JSON-formatet:
+Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
 {
-  "summary": "2-3 setninger om kampen og datagrunnlaget",
-  "homeStrengths": ["punkt1", "punkt2"],
-  "awayStrengths": ["punkt1", "punkt2"],
-  "keyFactors": ["faktor1", "faktor2", "faktor3"],
+  "summary": "2-3 setninger om kampen, hva modellen finner og viktigste driver",
+  "homeStrengths": ["konkret punkt1", "konkret punkt2"],
+  "awayStrengths": ["konkret punkt1", "konkret punkt2"],
+  "keyFactors": ["faktor1 med tall", "faktor2 med tall", "faktor3 med tall"],
   "probabilities": {
     "homeWin": 0.XX,
     "draw": 0.XX,
     "awayWin": 0.XX,
-    "over25": 0.XX
+    "over25": 0.XX,
+    "under25": 0.XX
   }
 }`;
 
@@ -165,14 +194,20 @@ Svar KUN i dette JSON-formatet:
 
   const text = response.content[0].type === "text" ? response.content[0].text : "";
 
-  const defaultProbs = { homeWin: mktHome, draw: mktDraw, awayWin: mktAway, over25: mktOver ?? 0.5 };
+  const defaultProbs = {
+    homeWin: mktHome,
+    draw:    mktDraw,
+    awayWin: mktAway,
+    over25:  mktOver  ?? (poisson?.over25  ?? 0.5),
+    under25: mktUnder ?? (poisson?.under25 ?? 0.5),
+  };
 
   let parsed: {
     summary: string;
     homeStrengths: string[];
     awayStrengths: string[];
     keyFactors: string[];
-    probabilities: { homeWin: number; draw: number; awayWin: number; over25: number };
+    probabilities: { homeWin: number; draw: number; awayWin: number; over25: number; under25?: number };
   };
 
   try {
@@ -195,15 +230,21 @@ Svar KUN i dette JSON-formatet:
     };
   }
 
-  const prob = parsed.probabilities;
+  const prob = {
+    ...parsed.probabilities,
+    under25: parsed.probabilities.under25 ?? (1 - (parsed.probabilities.over25 ?? 0.5)),
+  };
 
   // ── Bygg betsforslag ──
   const candidates = [
-    { market: "Hjemmeseier (1)",  ourProb: prob.homeWin, odds: odds.bestHomeWin.odds, bookmaker: odds.bestHomeWin.bookmaker },
-    { market: "Uavgjort (X)",     ourProb: prob.draw,    odds: odds.bestDraw.odds,    bookmaker: odds.bestDraw.bookmaker },
-    { market: "Borteseier (2)",   ourProb: prob.awayWin, odds: odds.bestAwayWin.odds, bookmaker: odds.bestAwayWin.bookmaker },
+    { market: "Hjemmeseier (1)",  ourProb: prob.homeWin,        odds: odds.bestHomeWin.odds,        bookmaker: odds.bestHomeWin.bookmaker,        isDraw: false },
+    { market: "Uavgjort (X)",     ourProb: prob.draw,            odds: odds.bestDraw.odds,            bookmaker: odds.bestDraw.bookmaker,            isDraw: true  },
+    { market: "Borteseier (2)",   ourProb: prob.awayWin,         odds: odds.bestAwayWin.odds,         bookmaker: odds.bestAwayWin.bookmaker,         isDraw: false },
     ...(odds.bestOver25
-      ? [{ market: "Over 2.5 mål", ourProb: prob.over25, odds: odds.bestOver25.odds, bookmaker: odds.bestOver25.bookmaker }]
+      ? [{ market: "Over 2.5 mål",  ourProb: prob.over25,        odds: odds.bestOver25.odds,          bookmaker: odds.bestOver25.bookmaker,          isDraw: false }]
+      : []),
+    ...(odds.bestUnder25
+      ? [{ market: "Under 2.5 mål", ourProb: prob.under25 ?? (1 - prob.over25), odds: odds.bestUnder25.odds, bookmaker: odds.bestUnder25.bookmaker, isDraw: false }]
       : []),
   ];
 
@@ -215,15 +256,18 @@ Svar KUN i dette JSON-formatet:
 
     const edge = valueEdge(ourProb, bookOdds);
     const impliedProb = impliedProbability(bookOdds);
-    const absoluteEdge = ourProb - impliedProb; // prosentpoeng absolutt differanse
+    const absoluteEdge = ourProb - impliedProb;
 
-    // Krev BÅDE relativ (5%) OG absolutt (3 pp) edge for å unngå falske signal på høye odds
-    if (!isFinite(edge) || isNaN(edge) || edge < 0.05) continue;
-    if (absoluteEdge < 0.03) continue; // min 3 prosentpoeng absolutt
+    // Draw-bets er notorisk vanskelig å predikere — krev høyere terskel
+    const relThreshold = c.isDraw ? 0.08 : 0.05;
+    const absThreshold = c.isDraw ? 0.05 : 0.03;
+
+    if (!isFinite(edge) || isNaN(edge) || edge < relThreshold) continue;
+    if (absoluteEdge < absThreshold) continue;
 
     const confidence: BetSuggestion["confidence"] =
-      edge > 0.15 && absoluteEdge > 0.06 ? "HØY"
-      : edge > 0.08 && absoluteEdge > 0.04 ? "MEDIUM"
+      edge > 0.15 && absoluteEdge > 0.07 ? "HØY"
+      : edge > 0.09 && absoluteEdge > 0.05 ? "MEDIUM"
       : "LAV";
 
     bets.push({

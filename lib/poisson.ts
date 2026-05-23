@@ -15,6 +15,7 @@ export interface PoissonPrediction {
   draw: number;
   awayWin: number;
   over25: number;
+  under25: number;
   expectedHomeGoals: number;
   expectedAwayGoals: number;
 }
@@ -37,14 +38,46 @@ export function poissonPredict(
     }
   }
 
-  return { homeWin, draw, awayWin, over25, expectedHomeGoals, expectedAwayGoals };
+  // Normaliser slik at homeWin + draw + awayWin = 1 eksakt
+  const total = homeWin + draw + awayWin;
+  homeWin /= total;
+  draw    /= total;
+  awayWin /= total;
+
+  return {
+    homeWin,
+    draw,
+    awayWin,
+    over25,
+    under25: 1 - over25,
+    expectedHomeGoals,
+    expectedAwayGoals,
+  };
 }
 
-// Eliteserien: gjennomsnitt ~1.38 mål per lag per kamp (sesong 2024/2025)
-const ELITESERIEN_AVG_GOALS = 1.38;
+// Eliteserien 2026: faktisk ~1.48 mål per lag per kamp (beregnet fra sesongdata 23. mai 2026)
+// NB: var 1.38 (2024/2025) — 2026-sesongen har høyere scoring
+const ELITESERIEN_AVG_GOALS = 1.48;
+
+// Form-multiplikator basert på de siste 5 resultatene
+// W=full verdi, D=delvis, L=ingenting — vekter nylig form ±10%
+export function formMultiplier(form: string): number {
+  if (!form || form.length === 0) return 1.0;
+  const recent = form.slice(-5);
+  let points = 0;
+  for (const c of recent) {
+    if (c === "W") points += 3;
+    else if (c === "D") points += 1;
+    // L = 0 poeng
+  }
+  const maxPoints = recent.length * 3;
+  // Skaler fra 0.88 (LLLLL) til 1.12 (WWWWW)
+  return 0.88 + 0.24 * (points / maxPoints);
+}
 
 // Utled forventede mål fra sesongstatistikk
 // Angreps-/forsvarsstyrke kalkuleres relativt til ligasnitt
+// homeForm/awayForm brukes for å vekte siste 5 kamper ekstra
 export function expectedGoalsFromForm(
   homeGoalsFor: number,
   homeGoalsAgainst: number,
@@ -52,7 +85,9 @@ export function expectedGoalsFromForm(
   awayGoalsFor: number,
   awayGoalsAgainst: number,
   awayPlayed: number,
-  leagueAvg: number = ELITESERIEN_AVG_GOALS
+  leagueAvg: number = ELITESERIEN_AVG_GOALS,
+  homeFormStr: string = "",
+  awayFormStr: string = "",
 ): { expectedHome: number; expectedAway: number } | null {
   if (homePlayed < 3 || awayPlayed < 3) return null;
 
@@ -62,9 +97,15 @@ export function expectedGoalsFromForm(
   const awayAttack  = (awayGoalsFor     / awayPlayed) / leagueAvg;
   const awayDefense = (awayGoalsAgainst / awayPlayed) / leagueAvg;
 
+  // Form-vekting: nylige resultater justerer angrepsstyrken ±12%
+  const homeFM = formMultiplier(homeFormStr);
+  const awayFM = formMultiplier(awayFormStr);
+
   // Hjemmefordel: ~15 % boost basert på Eliteserien-historikk
-  const expectedHome = homeAttack * awayDefense * leagueAvg * 1.15;
-  const expectedAway = awayAttack * homeDefense * leagueAvg;
+  // Forventede mål = (hjemme-angrep × hjemme-form) × (borte-forsvar) × ligasnitt × hjemmefordel
+  const expectedHome = homeAttack * homeFM * awayDefense * leagueAvg * 1.15;
+  // Bortelaget justeres ned litt p.g.a. borteulempe (delt i 1.15-faktoren over)
+  const expectedAway = awayAttack * awayFM * homeDefense * leagueAvg;
 
   return {
     expectedHome: Math.max(0.3, Math.min(4.0, expectedHome)),
