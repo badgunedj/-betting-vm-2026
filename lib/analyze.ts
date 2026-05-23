@@ -18,6 +18,7 @@ export interface BetSuggestion {
   impliedProbability: number;
   valueEdgePct: number;
   recommendedStake: number;
+  evNOK: number;            // forventet gevinst i kr: (prob × odds − 1) × stake
   confidence: "HØY" | "MEDIUM" | "LAV";
 }
 
@@ -44,6 +45,7 @@ export async function analyzeMatch(
   homeInjuryStr: string = "",
   awayInjuryStr: string = "",
   newsStr: string = "",
+  kellyFraction: number = 0.25,   // justeres automatisk av drawdown-beskyttelse
 ): Promise<MatchAnalysis> {
   const pin = odds.pinnacleRef;
 
@@ -333,6 +335,10 @@ Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
       : edge > 0.09 && absoluteEdge > 0.05 ? "MEDIUM"
       : "LAV";
 
+    const stake = kellyStake(bankroll, ourProb, bookOdds, kellyFraction);
+    // EV i NOK: forventet netto gevinst per bet = (prob × odds − 1) × innsats
+    const evNOK = Math.round((ourProb * bookOdds - 1) * stake);
+
     bets.push({
       market: c.market,
       description: `${homeTeam} vs ${awayTeam} — ${c.market}`,
@@ -341,7 +347,8 @@ Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
       ourProbability: ourProb,
       impliedProbability: impliedProbability(bookOdds),
       valueEdgePct: Math.round(edge * 1000) / 10,
-      recommendedStake: kellyStake(bankroll, ourProb, bookOdds),
+      recommendedStake: stake,
+      evNOK,
       confidence,
     });
   }

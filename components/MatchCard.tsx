@@ -9,6 +9,7 @@ import {
   makeMatchKey,
 } from "@/lib/analysis-store";
 import { MAX_BOOKMAKER_MARGIN } from "@/lib/odds-api";
+import { getDrawdownStatus, DrawdownStatus } from "@/lib/drawdown";
 
 interface Props {
   homeTeam: string;
@@ -78,6 +79,7 @@ export default function MatchCard({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [fromCache, setFromCache] = useState(false);
+  const [drawdown, setDrawdown] = useState<DrawdownStatus | null>(null);
 
   // Last inn lagret analyse ved oppstart
   useEffect(() => {
@@ -90,6 +92,11 @@ export default function MatchCard({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchKey]);
+
+  // Drawdown-status (client-only — localStorage)
+  useEffect(() => {
+    setDrawdown(getDrawdownStatus(bankroll));
+  }, [bankroll]);
 
   async function runAnalysis(forceRefresh = false) {
     // Bruk cache hvis tilgjengelig og ikke tvungen oppdatering
@@ -112,8 +119,9 @@ export default function MatchCard({
         body: JSON.stringify({
           homeTeam, awayTeam, bankroll,
           odds: preloadedOdds,
-          commenceTime: date,   // for værvarsling
-          sport,                // for å velge riktige datakilder
+          commenceTime: date,
+          sport,
+          kellyFraction: drawdown?.kellyFraction ?? 0.25,
         }),
       });
       const data = await res.json();
@@ -336,11 +344,29 @@ export default function MatchCard({
             </div>
           )}
 
+          {/* Drawdown-banner */}
+          {drawdown && drawdown.mode !== "normal" && (
+            <div className={`rounded-lg p-3 text-sm font-medium border
+              ${drawdown.mode === "danger"
+                ? "bg-red-950 border-red-700 text-red-300"
+                : "bg-yellow-950 border-yellow-700 text-yellow-300"}`}>
+              {drawdown.message}
+              <span className="ml-2 text-xs opacity-70">
+                (topp: {drawdown.peakBankroll.toLocaleString("nb-NO")} kr → nå: {drawdown.currentBankroll.toLocaleString("nb-NO")} kr)
+              </span>
+            </div>
+          )}
+
           {/* Betsforslag */}
           {analysis.bets.length > 0 ? (
             <div>
               <p className="text-xs text-[#64748b] uppercase tracking-wider mb-3">
                 Betsforslag ({analysis.bets.length})
+                {drawdown && drawdown.mode !== "normal" && (
+                  <span className="ml-2 font-semibold text-yellow-400">
+                    · {(drawdown.kellyFraction * 100).toFixed(0)}% Kelly aktiv
+                  </span>
+                )}
               </p>
               <div className="space-y-3">
                 {analysis.bets.map((bet, i) => (
@@ -361,12 +387,19 @@ export default function MatchCard({
                           {bet.confidence}
                         </span>
                       </div>
-                      <span className="text-green-400 font-bold text-sm">
-                        +{bet.valueEdgePct}% edge
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-400 font-bold text-sm">
+                          +{bet.valueEdgePct}% edge
+                        </span>
+                        {bet.evNOK > 0 && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-green-950 text-green-300 font-mono">
+                            EV +{bet.evNOK} kr
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3 text-xs text-[#64748b] mb-3">
+                    <div className="grid grid-cols-4 gap-3 text-xs text-[#64748b] mb-3">
                       <div>
                         <p>Odds</p>
                         <p className="text-white font-mono font-bold text-base">{bet.odds.toFixed(2)}</p>
@@ -378,6 +411,12 @@ export default function MatchCard({
                       <div>
                         <p>Anbefalt innsats</p>
                         <p className="text-white font-mono font-bold">{bet.recommendedStake} kr</p>
+                      </div>
+                      <div>
+                        <p>Forventet gevinst</p>
+                        <p className={`font-mono font-bold ${bet.evNOK >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {bet.evNOK >= 0 ? "+" : ""}{bet.evNOK} kr
+                        </p>
                       </div>
                     </div>
 

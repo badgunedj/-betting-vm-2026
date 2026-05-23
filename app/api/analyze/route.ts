@@ -21,7 +21,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 
 export async function POST(req: NextRequest) {
   try {
-    const { homeTeam, awayTeam, bankroll, odds, commenceTime, sport } = await req.json();
+    const { homeTeam, awayTeam, bankroll, odds, commenceTime, sport, kellyFraction } = await req.json();
 
     const matchOdds: MatchOdds = odds;
     if (!matchOdds || !matchOdds.bookmakers?.length) {
@@ -158,6 +158,7 @@ export async function POST(req: NextRequest) {
       homeInjuryStr,
       awayInjuryStr,
       newsStr,
+      kellyFraction ?? 0.25,
     );
 
     return NextResponse.json({ analysis, odds: matchOdds });
