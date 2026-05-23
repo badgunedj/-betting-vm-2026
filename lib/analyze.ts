@@ -9,6 +9,13 @@ function getClient() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_KEY });
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>(resolve => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
 export interface BetSuggestion {
   market: string;
   description: string;
@@ -100,13 +107,14 @@ export async function analyzeMatch(
     const awayEdge = ((poisson.awayWin - mktAway) * 100).toFixed(1);
     const overEdge = mktOver ? ((poisson.over25  - mktOver)  * 100).toFixed(1) : null;
     const flagHome = Math.abs(poisson.homeWin - mktHome) >= 0.05 ? (poisson.homeWin > mktHome ? " ⬆️ MODELL OVER MARKED" : " ⬇️ MODELL UNDER MARKED") : "";
+    const flagDraw = Math.abs(poisson.draw    - mktDraw) >= 0.05 ? (poisson.draw    > mktDraw ? " ⬆️ MODELL OVER MARKED" : " ⬇️ MODELL UNDER MARKED") : "";
     const flagAway = Math.abs(poisson.awayWin - mktAway) >= 0.05 ? (poisson.awayWin > mktAway ? " ⬆️ MODELL OVER MARKED" : " ⬇️ MODELL UNDER MARKED") : "";
     const flagOver = overEdge && Math.abs(poisson.over25 - (mktOver ?? 0)) >= 0.05 ? (poisson.over25 > (mktOver ?? 0) ? " ⬆️ MODELL OVER" : " ⬇️ MODELL UNDER") : "";
     return `\nPOISSON-MODELL (form-vektet, ligasnitt 1.48 mål/lag):
 - Forventede mål: Hjemme ${poisson.expectedHomeGoals.toFixed(2)} | Borte ${poisson.expectedAwayGoals.toFixed(2)}
 - Modell vs Marked:
   Hjemme: ${pct(poisson.homeWin)} vs ${pct(mktHome)} (avvik: ${Number(homeEdge) > 0 ? "+" : ""}${homeEdge}pp)${flagHome}
-  Uavgjort: ${pct(poisson.draw)} vs ${pct(mktDraw)} (avvik: ${Number(drawEdge) > 0 ? "+" : ""}${drawEdge}pp)${flagAway}
+  Uavgjort: ${pct(poisson.draw)} vs ${pct(mktDraw)} (avvik: ${Number(drawEdge) > 0 ? "+" : ""}${drawEdge}pp)${flagDraw}
   Borte: ${pct(poisson.awayWin)} vs ${pct(mktAway)} (avvik: ${Number(awayEdge) > 0 ? "+" : ""}${awayEdge}pp)${flagAway}
   Over 2.5: ${pct(poisson.over25)} vs ${mktOver ? pct(mktOver) : "N/A"} (avvik: ${overEdge ? (Number(overEdge) > 0 ? "+" : "") + overEdge + "pp" : "N/A"})${flagOver}`;
   })() : "";
@@ -232,13 +240,20 @@ Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
   }
 }`;
 
-  const response = await getClient().messages.create({
-    model: "claude-haiku-4-5",
-    max_tokens: 1024,
-    messages: [{ role: "user", content: prompt }],
-  });
+  // 7s timeout — Vercel Hobby har 10s totalt; Claude Haiku er vanligvis <3s
+  const response = await withTimeout(
+    getClient().messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 1536,  // 1024 kunne bli kappet på lange JSON-svar
+      temperature: 0.2,  // lavere variasjon → mer konsistent sannsynlighetsestimering
+      messages: [{ role: "user", content: prompt }],
+    }),
+    7000
+  );
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response
+    ? (response.content[0].type === "text" ? response.content[0].text : "")
+    : "";
 
   const defaultProbs = {
     homeWin: mktHome,
@@ -280,6 +295,18 @@ Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
     ...parsed.probabilities,
     under25: parsed.probabilities.under25 ?? (1 - (parsed.probabilities.over25 ?? 0.5)),
   };
+
+  // ── Klampe Claude til Poisson ±6pp (kode-håndhevelse, ikke bare prompt-instruksjon) ──
+  if (poisson) {
+    const clamp = (v: number, center: number, max = 0.06) =>
+      Math.max(center - max, Math.min(center + max, v));
+    prob.homeWin = clamp(prob.homeWin, poisson.homeWin);
+    prob.draw    = clamp(prob.draw,    poisson.draw);
+    prob.awayWin = clamp(prob.awayWin, poisson.awayWin);
+    // Over/Under: Poisson score-matrise er mer presis enn AI-estimat — bruk direkte
+    prob.over25  = poisson.over25;
+    prob.under25 = poisson.under25;
+  }
 
   // ── Bygg betsforslag ──
   const candidates = [
@@ -361,6 +388,8 @@ Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
       : "LAV";
 
     const stake = kellyStake(bankroll, ourProb, bookOdds, kellyFraction);
+    // Kelly returnerer 0 hvis beregnet stake er under 100kr (edge for marginal)
+    if (stake === 0) continue;
     // EV i NOK: forventet netto gevinst per bet = (prob × odds − 1) × innsats
     const evNOK = Math.round((ourProb * bookOdds - 1) * stake);
 

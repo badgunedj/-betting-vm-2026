@@ -92,6 +92,10 @@ export function poissonAH(
 // NB: var 1.38 (2024/2025) — 2026-sesongen har høyere scoring
 const ELITESERIEN_AVG_GOALS = 1.48;
 
+// xG-ligasnitt er lavere enn faktiske mål (~1.43) fordi xG filtrerer ut flaks
+// Brukes som referanse når modellen baserer seg på xG fremfor faktiske mål
+const XG_LEAGUE_AVG = 1.43;
+
 // Form-multiplikator basert på de siste 5 resultatene
 // W=full verdi, D=delvis, L=ingenting — vekter nylig form ±10%
 export function formMultiplier(form: string): number {
@@ -134,16 +138,20 @@ export function expectedGoalsFromForm(
 
   // Foretrekk xG når tilgjengelig — mer stabil enn faktiske mål (fjerner flaks-støy)
   const usedXG = !!(homeXgFor || awayXgFor);
-  const homeGF = homeXgFor  ?? (homeGoalsFor     / homePlayed);
+  const homeGF = homeXgFor     ?? (homeGoalsFor     / homePlayed);
   const homeGA = homeXgAgainst ?? (homeGoalsAgainst / homePlayed);
-  const awayGF = awayXgFor  ?? (awayGoalsFor     / awayPlayed);
+  const awayGF = awayXgFor     ?? (awayGoalsFor     / awayPlayed);
   const awayGA = awayXgAgainst ?? (awayGoalsAgainst / awayPlayed);
 
-  // Angrepsstyrke = mål/xG per kamp relativt til ligasnitt
-  const homeAttack  = homeGF / leagueAvg;
-  const homeDefense = homeGA / leagueAvg;
-  const awayAttack  = awayGF / leagueAvg;
-  const awayDefense = awayGA / leagueAvg;
+  // Bruk xG-ligasnitt (~1.43) når xG-data er tilgjengelig, faktisk snitt (1.48) ellers.
+  // Uten dette brukes feil referanse og relativ styrke blir systematisk undervurdert.
+  const effectiveAvg = usedXG ? XG_LEAGUE_AVG : leagueAvg;
+
+  // Angrepsstyrke = mål/xG per kamp relativt til riktig ligasnitt
+  const homeAttack  = homeGF / effectiveAvg;
+  const homeDefense = homeGA / effectiveAvg;
+  const awayAttack  = awayGF / effectiveAvg;
+  const awayDefense = awayGA / effectiveAvg;
 
   // Form-vekting: nylige resultater justerer angrepsstyrken ±12%
   const homeFM = formMultiplier(homeFormStr);
@@ -151,8 +159,8 @@ export function expectedGoalsFromForm(
 
   // Hjemmefordel: ~15 % boost basert på Eliteserien-historikk
   // fatigue: reduserer angrepsstyrken ved kamp-tetthet (0.90–0.95)
-  const expectedHome = homeAttack * homeFM * homeFatigue * awayDefense * leagueAvg * 1.15;
-  const expectedAway = awayAttack * awayFM * awayFatigue * homeDefense * leagueAvg;
+  const expectedHome = homeAttack * homeFM * homeFatigue * awayDefense * effectiveAvg * 1.15;
+  const expectedAway = awayAttack * awayFM * awayFatigue * homeDefense * effectiveAvg;
 
   return {
     expectedHome: Math.max(0.3, Math.min(4.0, expectedHome)),

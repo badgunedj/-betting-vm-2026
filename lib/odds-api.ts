@@ -83,8 +83,9 @@ export function kellyStake(
 
   const stake = kelly * fraction * bankroll;
 
-  // Minimum 100kr (ikke 50 — for lavt til å ha verdi etter margin)
-  if (stake < 100) return 100;
+  // Beregnet stake under 100kr → edge er for marginal til å rettferdiggjøre bet
+  // Returnerer 0 fremfor å overbet (4× Kelly ved minimum)
+  if (stake < 100) return 0;
 
   // Rund til nærmeste 50 kr for enklere betting
   return Math.round(stake / 50) * 50;
@@ -148,17 +149,25 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
 
   if (!Array.isArray(h2hData)) return [];
 
-  // Bygg totals-map for rask oppslag (best over OG best under per kamp)
-  const totalsMap = new Map<string, { over: number; under: number; bk: string }>();
+  // Bygg separate beste-over / beste-under maps — beste odds per marked på tvers av bookmakers
+  // (tidl. feil: tok første bookmaker, ikke beste odds)
+  const bestOverMap  = new Map<string, { odds: number; bookmaker: string }>();
+  const bestUnderMap = new Map<string, { odds: number; bookmaker: string }>();
   if (Array.isArray(totalsData)) {
     for (const event of totalsData) {
       for (const bk of event.bookmakers ?? []) {
+        if (bk.key === "pinnacle") continue; // referanse-only
         const market = bk.markets?.find((m: { key: string }) => m.key === "totals");
         if (!market) continue;
-        const over = market.outcomes?.find((o: { name: string }) => o.name === "Over")?.price;
+        const over  = market.outcomes?.find((o: { name: string }) => o.name === "Over")?.price;
         const under = market.outcomes?.find((o: { name: string }) => o.name === "Under")?.price;
-        if (over && under && !totalsMap.has(event.id)) {
-          totalsMap.set(event.id, { over, under, bk: bk.key });
+        if (over) {
+          const cur = bestOverMap.get(event.id);
+          if (!cur || over > cur.odds) bestOverMap.set(event.id, { odds: over, bookmaker: bk.key });
+        }
+        if (under) {
+          const cur = bestUnderMap.get(event.id);
+          if (!cur || under > cur.odds) bestUnderMap.set(event.id, { odds: under, bookmaker: bk.key });
         }
       }
     }
@@ -170,7 +179,7 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
   if (Array.isArray(bttsData)) {
     for (const event of bttsData) {
       for (const bk of event.bookmakers ?? []) {
-        const market = bk.markets?.find((m: { key: string }) => m.key === "bts");
+        const market = bk.markets?.find((m: { key: string }) => m.key === "btts");
         if (!market) continue;
         const yes = market.outcomes?.find((o: { name: string }) => o.name === "Yes")?.price;
         const no  = market.outcomes?.find((o: { name: string }) => o.name === "No")?.price;
@@ -188,7 +197,9 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
 
   return h2hData.map((event) => {
     const bookmakers: BookmakerOdds[] = [];
-    const totals = totalsMap.get(event.id);
+    // Hent beste over/under for dette eventet (nå korrekt: beste odds, ikke første bookmaker)
+    const eventBestOver  = bestOverMap.get(event.id)?.odds  ?? null;
+    const eventBestUnder = bestUnderMap.get(event.id)?.odds ?? null;
 
     for (const bk of event.bookmakers ?? []) {
       const market = bk.markets?.find((m: { key: string }) => m.key === "h2h");
@@ -209,8 +220,8 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
         homeWin: home,
         draw: draw ?? 0,
         awayWin: away,
-        over25:  totals?.over ?? null,
-        under25: totals?.under ?? null,
+        over25:  eventBestOver,
+        under25: eventBestUnder,
         bttsYes: bestYes ? bestYes.odds : null,
         bttsNo:  bestNo  ? bestNo.odds  : null,
         margin,
@@ -258,14 +269,6 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       }
     }
 
-    // Finn beste under25-odds på tvers av bookmakers
-    let bestUnder: { odds: number; bookmaker: string } | null = null;
-    for (const bk of bookmakers) {
-      if (bk.under25 && bk.under25 > 1 && (!bestUnder || bk.under25 > bestUnder.odds)) {
-        bestUnder = { odds: bk.under25, bookmaker: bk.bookmaker };
-      }
-    }
-
     // Trekk ut Pinnacle separat som referanselinje (skarpeste odds i verden)
     // Normaliser probabilitetene slik at margin fjernes → "sann" markedspris
     let pinnacleRef: PinnacleRef | null = null;
@@ -305,8 +308,8 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       bestHomeWin: best("homeWin"),
       bestDraw: best("draw"),
       bestAwayWin: best("awayWin"),
-      bestOver25:   totals ? { odds: totals.over, bookmaker: totals.bk } : null,
-      bestUnder25:  bestUnder,
+      bestOver25:   bestOverMap.get(event.id)  ?? null,
+      bestUnder25:  bestUnderMap.get(event.id) ?? null,
       bestBttsYes:  bttsYesMap.get(event.id) ?? null,
       bestBttsNo:   bttsNoMap.get(event.id)  ?? null,
       pinnacleRef,
