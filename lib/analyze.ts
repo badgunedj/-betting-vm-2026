@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { TeamForm, H2HRecord, InjuryReport } from "./api-football";
+import { TeamForm, H2HRecord } from "./api-football";
 import { MatchOdds, impliedProbability, kellyStake, valueEdge } from "./odds-api";
 import { ClubEloResult } from "./club-elo";
 import { MatchWeather } from "./weather";
@@ -41,8 +41,9 @@ export async function analyzeMatch(
   elo: ClubEloResult | null = null,
   weather: MatchWeather | null = null,
   poisson: PoissonPrediction | null = null,
-  homeInjuries: InjuryReport[] = [],
-  awayInjuries: InjuryReport[] = [],
+  homeInjuryStr: string = "",
+  awayInjuryStr: string = "",
+  newsStr: string = "",
 ): Promise<MatchAnalysis> {
 
   // ── Bookmaker-konsensus (fjern margin) ──
@@ -96,13 +97,13 @@ export async function analyzeMatch(
     : "";
 
   // ── Skader ──
-  const injStr = (injuries: InjuryReport[], team: string) =>
-    injuries.length > 0
-      ? `${team} mangler: ${injuries.map(i => `${i.playerName} (${i.reason})`).join(", ")}`
-      : `${team}: Ingen kjente skader`;
+  const injurySection = (homeInjuryStr || awayInjuryStr)
+    ? `\nSKADELISTE:\n- ${homeTeam}: ${homeInjuryStr || "Ingen kjente skader"}\n- ${awayTeam}: ${awayInjuryStr || "Ingen kjente skader"}`
+    : "";
 
-  const injurySection = (homeInjuries.length > 0 || awayInjuries.length > 0)
-    ? `\nSKADELISTE:\n${injStr(homeInjuries, homeTeam)}\n${injStr(awayInjuries, awayTeam)}`
+  // ── Nyheter / kontekst ──
+  const newsSection = newsStr
+    ? `\n═══ SISTE NYHETER OG KONTEKST ═══\n${newsStr}`
     : "";
 
   const hasGoodData = poisson !== null || elo?.homeElo !== null;
@@ -116,13 +117,13 @@ KAMP: ${homeTeam} vs ${awayTeam}
 ═══ MARKEDETS KONSENSUS (uten bookmaker-margin) ═══
 - Hjemmeseier: ${pct(mktHome)} | Uavgjort: ${pct(mktDraw)} | Borteseier: ${pct(mktAway)}${mktOver ? ` | Over 2.5: ${pct(mktOver)}` : ""}
 
-═══ LAGFORM (sesong 2025) ═══
+═══ LAGFORM (sesong 2026) ═══
 - ${homeTeam}: ${formStr(homeForm)}
 - ${awayTeam}: ${formStr(awayForm)}
 ${injurySection}
 ═══ H2H HISTORIKK ═══
 ${h2hStr}
-${weatherSection}
+${weatherSection}${newsSection}
 
 ═══ BESTE ODDS ═══
 ${oddsStr}

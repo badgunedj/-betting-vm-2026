@@ -8,6 +8,8 @@ import { getMatchWeather } from "@/lib/weather";
 import { expectedGoalsFromForm, poissonPredict } from "@/lib/poisson";
 import { getNationalEloResult } from "@/lib/national-elo";
 import { getTeamStats2026 } from "@/lib/eliteserien-stats";
+import { getTeamInjuryReport, injuryReportToString } from "@/lib/injuries";
+import { getLatestFootballNews, getRecentResults, getTeamRecentForm } from "@/lib/news-feed";
 
 // Vercel Hobby plan: 10 sek maks — gi hvert kall 3 sek timeout
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -60,8 +62,14 @@ export async function POST(req: NextRequest) {
     const homeFormFromStats = toTeamForm(homeStats2026, homeInfo?.apiFootballId ?? 0);
     const awayFormFromStats = toTeamForm(awayStats2026, awayInfo?.apiFootballId ?? 0);
 
+    // Skader: hardkodet (ingen nettverkskall), synkront
+    const homeInjuryReport = isEliteserien ? getTeamInjuryReport(homeTeam) : null;
+    const awayInjuryReport = isEliteserien ? getTeamInjuryReport(awayTeam) : null;
+    const homeInjuryStr = homeInjuryReport ? injuryReportToString(homeInjuryReport) : "";
+    const awayInjuryStr = awayInjuryReport ? injuryReportToString(awayInjuryReport) : "";
+
     // Hent datakilder parallelt med timeout — alle feiler gracefully
-    const [, , h2h, clubElo, weather] = await Promise.all([
+    const [, , h2h, clubElo, weather, homeNews, awayNews, recentResults] = await Promise.all([
       Promise.resolve(null), // form: bruker 2026-stats istedet
       Promise.resolve(null),
 
@@ -84,10 +92,42 @@ export async function POST(req: NextRequest) {
       homeInfo && isEliteserien
         ? withTimeout(getMatchWeather(homeInfo.stadiumLat, homeInfo.stadiumLon, matchDate), TIMEOUT, null)
         : Promise.resolve(null),
+
+      // VG-nyheter for hjemme- og bortelag (gratis RSS)
+      isEliteserien
+        ? withTimeout(getLatestFootballNews(homeTeam), TIMEOUT, [])
+        : Promise.resolve([]),
+
+      isEliteserien
+        ? withTimeout(getLatestFootballNews(awayTeam), TIMEOUT, [])
+        : Promise.resolve([]),
+
+      // TheSportsDB siste resultater (for form-tekst)
+      isEliteserien
+        ? withTimeout(getRecentResults(4358), TIMEOUT, [])
+        : Promise.resolve([]),
     ]);
 
     // Kombiner ELO-kilder: nasjonal-ELO for VM, club ELO for Eliteserien
     const elo = nationalElo ?? clubElo;
+
+    // Bygg nyhetskontekst fra VG RSS + TheSportsDB form
+    const newsLines: string[] = [];
+    if (homeNews.length > 0) {
+      newsLines.push(`${homeTeam}:`);
+      homeNews.forEach(n => newsLines.push(`  • ${n.title}`));
+    }
+    if (awayNews.length > 0) {
+      newsLines.push(`${awayTeam}:`);
+      awayNews.forEach(n => newsLines.push(`  • ${n.title}`));
+    }
+    if (recentResults.length > 0) {
+      const homeFormStr = getTeamRecentForm(recentResults, homeTeam);
+      const awayFormStr = getTeamRecentForm(recentResults, awayTeam);
+      if (homeFormStr !== "Ingen resultater funnet") newsLines.push(`${homeTeam} siste kamper: ${homeFormStr}`);
+      if (awayFormStr !== "Ingen resultater funnet") newsLines.push(`${awayTeam} siste kamper: ${awayFormStr}`);
+    }
+    const newsStr = newsLines.join("\n");
 
     // Bruk 2026-stats som primær form-kilde for Eliteserien
     const homeForm = homeFormFromStats;
@@ -112,8 +152,9 @@ export async function POST(req: NextRequest) {
       elo,
       weather ?? null,
       poissonPred,
-      [],
-      [],
+      homeInjuryStr,
+      awayInjuryStr,
+      newsStr,
     );
 
     return NextResponse.json({ analysis, odds: matchOdds });
