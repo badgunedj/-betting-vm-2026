@@ -9,6 +9,7 @@ import {
 } from "@/lib/analysis-store";
 import { getCLVStats, getCLVEntries, clearCLVEntries, CLVEntry } from "@/lib/clv-store";
 import { getBetResults, getPnLStats, resolveBet, clearResults, BetResult, PnLStats } from "@/lib/result-store";
+import { computeCalibration, CalibrationStats } from "@/lib/calibration";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("nb-NO", {
@@ -37,6 +38,8 @@ export default function AnalysisHistory() {
   const [betResults, setBetResults] = useState<BetResult[]>([]);
   const [pnlStats, setPnlStats] = useState<PnLStats | null>(null);
   const [showResults, setShowResults] = useState(false);
+  const [calibration, setCalibration] = useState<CalibrationStats | null>(null);
+  const [showCalibration, setShowCalibration] = useState(false);
 
   const reload = () => {
     setAnalyses(getAllAnalyses());
@@ -44,6 +47,7 @@ export default function AnalysisHistory() {
     const results = getBetResults();
     setBetResults(results);
     setPnlStats(getPnLStats());
+    setCalibration(computeCalibration());
   };
 
   useEffect(() => { reload(); }, []);
@@ -112,7 +116,7 @@ export default function AnalysisHistory() {
         const clvStats = getCLVStats();
         const pl = pnlStats;
         return (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
             <div className="rounded-xl bg-[#1a1d27] border border-[#2a2d3a] p-3 text-center">
               <p className="text-2xl font-bold text-white">{analyses.length}</p>
               <p className="text-xs text-[#64748b]">Analyser</p>
@@ -166,6 +170,34 @@ export default function AnalysisHistory() {
                 <>
                   <p className="text-2xl font-bold text-[#64748b]">—</p>
                   <p className="text-xs text-[#64748b]">P&L (0 bets)</p>
+                </>
+              )}
+            </div>
+
+            {/* Kalibrering-stat */}
+            <div
+              className="rounded-xl border p-3 text-center cursor-pointer transition-colors
+                border-green-900 bg-[#0a1a0a] hover:bg-[#0d200d]"
+              onClick={() => setShowCalibration(!showCalibration)}
+              title="Klikk for å se Brier score og kalibrering per sannsynlighetsspenn"
+            >
+              {calibration && calibration.totalResolved >= 5 ? (
+                <>
+                  <p className={`text-2xl font-bold ${
+                    (calibration.brierSkill ?? 0) > 10 ? "text-green-400"
+                    : (calibration.brierSkill ?? 0) > 0  ? "text-yellow-400"
+                    : "text-red-400"
+                  }`}>
+                    {(calibration.brierSkill ?? 0) > 0 ? "+" : ""}{calibration.brierSkill}%
+                  </p>
+                  <p className="text-xs text-[#64748b]">Brier skill ({calibration.totalResolved})</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-2xl font-bold text-[#64748b]">—</p>
+                  <p className="text-xs text-[#64748b]">
+                    Kalibrering ({calibration?.totalResolved ?? 0}/5)
+                  </p>
                 </>
               )}
             </div>
@@ -327,6 +359,132 @@ export default function AnalysisHistory() {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* KalibreringsPanel */}
+      {showCalibration && calibration && (
+        <div className="rounded-xl border border-green-900 bg-[#0a1a0a] p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-green-400 font-semibold uppercase tracking-wider">
+              🎯 Modellkalibrering — Brier Score
+            </p>
+            <span className="text-xs text-[#64748b]">{calibration.totalResolved} avgjorte bets</span>
+          </div>
+
+          {calibration.totalResolved < 5 ? (
+            <p className="text-xs text-[#64748b] text-center py-4">
+              Trenger minst 5 avgjorte bets. Logg bets via 📝-knappen og marker utfall (V/T) i P&L-panelet.
+            </p>
+          ) : (
+            <>
+              {/* Hoved-stats */}
+              <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                <div className="rounded-lg bg-[#1a1d27] p-2">
+                  <p className={`text-lg font-bold font-mono ${
+                    (calibration.brierSkill ?? 0) > 10 ? "text-green-400"
+                    : (calibration.brierSkill ?? 0) > 0  ? "text-yellow-400"
+                    : "text-red-400"
+                  }`}>
+                    {(calibration.brierSkill ?? 0) > 0 ? "+" : ""}{calibration.brierSkill}%
+                  </p>
+                  <p className="text-xs text-[#64748b]">Brier skill</p>
+                  <p className="text-xs text-[#475569]">vs 50%-modell</p>
+                </div>
+                <div className="rounded-lg bg-[#1a1d27] p-2">
+                  <p className="text-lg font-bold font-mono text-white">{calibration.brierScore}</p>
+                  <p className="text-xs text-[#64748b]">Brier score</p>
+                  <p className="text-xs text-[#475569]">↓ lavere = bedre</p>
+                </div>
+                <div className="rounded-lg bg-[#1a1d27] p-2">
+                  <p className={`text-lg font-bold font-mono ${
+                    Math.abs(calibration.calibrationBias ?? 0) < 3 ? "text-green-400"
+                    : (calibration.calibrationBias ?? 0) > 0 ? "text-blue-400"
+                    : "text-orange-400"
+                  }`}>
+                    {(calibration.calibrationBias ?? 0) > 0 ? "+" : ""}{calibration.calibrationBias}pp
+                  </p>
+                  <p className="text-xs text-[#64748b]">Bias</p>
+                  <p className="text-xs text-[#475569]">
+                    {(calibration.calibrationBias ?? 0) > 2 ? "undervurderer" : (calibration.calibrationBias ?? 0) < -2 ? "overvurderer" : "godt kalibrert"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Kalibreringsplott */}
+              {calibration.bins.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs text-[#64748b] mb-2">Spådd vs faktisk per sannsynlighetsspenn:</p>
+                  <div className="space-y-1.5">
+                    {calibration.bins.map(bin => {
+                      const barWidth = Math.round(bin.actualRate);
+                      const predWidth = Math.round(bin.predictedAvg);
+                      const isOver = bin.delta > 3;   // undervurdert (faktisk > spådd)
+                      const isUnder = bin.delta < -3; // overvurdert (faktisk < spådd)
+                      return (
+                        <div key={bin.label} className="text-xs">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-[#94a3b8] w-14">{bin.label}</span>
+                            <span className="text-[#64748b]">{bin.count} bets</span>
+                            <span className={`font-mono font-semibold ${isOver ? "text-blue-400" : isUnder ? "text-orange-400" : "text-green-400"}`}>
+                              {bin.actualRate}% faktisk
+                              {Math.abs(bin.delta) >= 3 && (
+                                <span className="ml-1 text-[#64748b]">
+                                  ({bin.delta > 0 ? "+" : ""}{bin.delta}pp)
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          {/* Bar: grå = spådd, farget = faktisk */}
+                          <div className="relative h-2 bg-[#1a1d27] rounded-full overflow-hidden">
+                            <div
+                              className="absolute top-0 left-0 h-full bg-[#334155] rounded-full"
+                              style={{ width: `${predWidth}%` }}
+                            />
+                            <div
+                              className={`absolute top-0 left-0 h-full rounded-full opacity-80 ${
+                                isOver ? "bg-blue-500" : isUnder ? "bg-orange-500" : "bg-green-500"
+                              }`}
+                              style={{ width: `${barWidth}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-4 mt-2 text-xs text-[#64748b]">
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-[#334155] mr-1" />Spådd</span>
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1" />Faktisk (OK)</span>
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1" />Undervurdert</span>
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-orange-500 mr-1" />Overvurdert</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Per-marked */}
+              {calibration.perMarket.length > 0 && (
+                <div>
+                  <p className="text-xs text-[#64748b] mb-1">Brier score per marked:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {calibration.perMarket.map(m => (
+                      <span key={m.market}
+                        className="text-xs px-2 py-1 rounded bg-[#1a1d27] text-[#94a3b8]">
+                        {m.market}{" "}
+                        <span className={`font-mono font-bold ${m.brierScore < 0.20 ? "text-green-400" : m.brierScore < 0.25 ? "text-yellow-400" : "text-red-400"}`}>
+                          {m.brierScore}
+                        </span>
+                        <span className="text-[#475569] ml-1">({m.count})</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-[#475569] mt-3">
+                Brier skill: +10%+ = god modell · 0% = like bra som 50%-gjett · negativ = dårligere enn tilfeldig
+              </p>
+            </>
           )}
         </div>
       )}
