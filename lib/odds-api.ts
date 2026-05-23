@@ -1,6 +1,9 @@
 const BASE_URL = "https://api.the-odds-api.com/v4";
 const KEY = process.env.ODDS_API_KEY!;
 
+// Bookmakers med margin > dette ignoreres som bet-mål (for grisk)
+export const MAX_BOOKMAKER_MARGIN = 0.08; // 8 %
+
 export interface BookmakerOdds {
   bookmaker: string;
   homeWin: number;
@@ -10,6 +13,7 @@ export interface BookmakerOdds {
   under25: number | null;
   bttsYes: number | null;
   bttsNo:  number | null;
+  margin: number;   // overround: 1/H + 1/X + 1/A − 1
 }
 
 // Pinnacle har verdens laveste margin (~4-5%) og regnes som "sann pris" av profesjonelle
@@ -163,6 +167,8 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       // BTTS-odds er event-nivå (beste på tvers av bookmakers) — vises i alle rader
       const bestYes = bttsYesMap.get(event.id);
       const bestNo  = bttsNoMap.get(event.id);
+      // Margin = sum av implisitte sannsynligheter − 1 (én beregning per bookmaker)
+      const margin = 1 / home + (draw ? 1 / draw : 0) + 1 / away - 1;
       bookmakers.push({
         bookmaker: bk.key,
         homeWin: home,
@@ -172,14 +178,25 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
         under25: totals?.under ?? null,
         bttsYes: bestYes ? bestYes.odds : null,
         bttsNo:  bestNo  ? bestNo.odds  : null,
+        margin,
       });
     }
 
+    // Bare bookmakers som er tilgjengelig i Norge OG har akseptabel margin
+    // Pinnacle ekskluderes alltid fra bet-mål (blokkert + referanse-only)
+    const bettable = bookmakers.filter(
+      b => b.bookmaker !== "pinnacle" && b.margin <= MAX_BOOKMAKER_MARGIN
+    );
+    // Fallback: bruk alle ikke-Pinnacle hvis alle har for høy margin
+    const betSource = bettable.length > 0
+      ? bettable
+      : bookmakers.filter(b => b.bookmaker !== "pinnacle");
+
     const best = (key: keyof BookmakerOdds) =>
-      bookmakers.reduce(
-        (best, bk) => {
+      betSource.reduce(
+        (acc, bk) => {
           const val = bk[key] as number;
-          return val > best.odds ? { odds: val, bookmaker: bk.bookmaker } : best;
+          return val > acc.odds ? { odds: val, bookmaker: bk.bookmaker } : acc;
         },
         { odds: 0, bookmaker: "" }
       );

@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { TeamForm, H2HRecord } from "./api-football";
-import { MatchOdds, impliedProbability, kellyStake, valueEdge } from "./odds-api";
+import { MatchOdds, impliedProbability, kellyStake, valueEdge, MAX_BOOKMAKER_MARGIN } from "./odds-api";
 import { ClubEloResult } from "./club-elo";
 import { MatchWeather } from "./weather";
 import { PoissonPrediction } from "./poisson";
@@ -80,7 +80,15 @@ export async function analyzeMatch(
     .join("\n") || "Ingen H2H-data";
 
   const oddsStr = odds.bookmakers
-    .map(bk => `${bk.bookmaker}: 1=${bk.homeWin} X=${bk.draw > 0 ? bk.draw : "-"} 2=${bk.awayWin}`)
+    .map(bk => {
+      const marginPct = (bk.margin * 100).toFixed(1);
+      const flag = bk.bookmaker === "pinnacle"
+        ? " [REFERANSE]"
+        : bk.margin > MAX_BOOKMAKER_MARGIN
+          ? ` [margin ${marginPct}% — IGNORERT]`
+          : ` [margin ${marginPct}%]`;
+      return `${bk.bookmaker}: 1=${bk.homeWin} X=${bk.draw > 0 ? bk.draw : "-"} 2=${bk.awayWin}${flag}`;
+    })
     .join("\n");
 
   // ── Poisson-seksjon + eksplisitt avvik fra marked ──

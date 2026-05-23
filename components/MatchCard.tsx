@@ -8,6 +8,7 @@ import {
   deleteAnalysis,
   makeMatchKey,
 } from "@/lib/analysis-store";
+import { MAX_BOOKMAKER_MARGIN } from "@/lib/odds-api";
 
 interface Props {
   homeTeam: string;
@@ -231,6 +232,7 @@ export default function MatchCard({
                   <th className="text-center pb-2">O2.5</th>
                   <th className="text-center pb-2">BTTS Ja</th>
                   <th className="text-center pb-2">BTTS Nei</th>
+                  <th className="text-center pb-2">Margin</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#2a2d3a]">
@@ -267,6 +269,19 @@ export default function MatchCard({
                       <td className={`text-center py-2 font-mono ${isPinnacle ? "text-blue-300" : "text-[#94a3b8]"}`}>
                         {bk.bttsNo ? bk.bttsNo.toFixed(2) : "-"}
                       </td>
+                      <td className={`text-center py-2 font-mono text-xs font-semibold
+                        ${isPinnacle
+                          ? "text-blue-300"
+                          : bk.margin > MAX_BOOKMAKER_MARGIN
+                            ? "text-red-400"
+                            : bk.margin > 0.06
+                              ? "text-yellow-400"
+                              : "text-green-400"}`}>
+                        {(bk.margin * 100).toFixed(1)}%
+                        {!isPinnacle && bk.margin > MAX_BOOKMAKER_MARGIN && (
+                          <span className="ml-1" title="For høy margin — ignoreres som bet-mål">⛔</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -292,6 +307,9 @@ export default function MatchCard({
           )}
 
           <p className="text-xs text-green-400 mt-2">↑ Grønt = beste odds du kan bette på</p>
+          <p className="text-xs text-[#64748b] mt-1">
+            Margin: <span className="text-green-400">grønn ≤6%</span> · <span className="text-yellow-400">gul 6–8%</span> · <span className="text-red-400">rød &gt;8% ⛔ ignoreres som bet-mål</span>
+          </p>
         </div>
       )}
 
