@@ -20,29 +20,49 @@ const SPORTS_TO_SCAN = [
 // Brukes for å unngå gjentatte varsler for samme bet
 // Fallback: ingen deduplisering hvis KV ikke er satt opp
 
-async function isAlerted(key: string): Promise<boolean> {
+async function kvGet(key: string): Promise<string | null> {
   const url   = process.env.KV_REST_API_URL;
   const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return false;
+  if (!url || !token) return null;
   try {
     const res  = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json() as { result: string | null };
-    return data.result !== null;
-  } catch { return false; }
+    return data.result ?? null;
+  } catch { return null; }
 }
 
-async function markAlerted(key: string): Promise<void> {
+async function kvSet(key: string, ttl: number, value: string): Promise<void> {
   const url   = process.env.KV_REST_API_URL;
   const token = process.env.KV_REST_API_TOKEN;
   if (!url || !token) return;
   try {
-    // TTL 12 timer — ikke re-alert innen 12 timer for samme bet
-    await fetch(`${url}/setex/${encodeURIComponent(key)}/43200/1`, {
+    await fetch(`${url}/setex/${encodeURIComponent(key)}/${ttl}/${encodeURIComponent(value)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
   } catch { /* ignore */ }
+}
+
+// Dedup-sjekk: 12 timers TTL → unngår gjentatte varsler
+async function isAlerted(key: string): Promise<boolean> {
+  return (await kvGet(`dedup_${key}`)) !== null;
+}
+
+async function markAlerted(key: string): Promise<void> {
+  await kvSet(`dedup_${key}`, 43200, "1"); // 12 timer
+}
+
+// Odds-historikk: 7 dagers TTL → sporer bevegelse på tvers av scanner-kjøringer
+async function getStoredOdds(key: string): Promise<number | null> {
+  const val = await kvGet(`odds_${key}`);
+  if (!val) return null;
+  const parsed = parseFloat(val);
+  return isNaN(parsed) ? null : parsed;
+}
+
+async function storeOdds(key: string, odds: number): Promise<void> {
+  await kvSet(`odds_${key}`, 604800, String(odds)); // 7 dager
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -151,6 +171,16 @@ export async function GET(req: NextRequest) {
           .replace(/[\s\/]+/g, "_").slice(0, 120);
         if (await isAlerted(alertKey)) continue;
 
+        // Odds-bevegelse: hent forrige kjøringens odds og beregn endring
+        // Negativ = odds har kortet (sharps er inne) — bullish
+        // Positiv = odds har driftet — marked skeptisk
+        const prevOdds = await getStoredOdds(alertKey);
+        const oddsMovement = prevOdds !== null
+          ? Math.round(((c.odds - prevOdds) / prevOdds) * 1000) / 10
+          : null;
+        // Alltid oppdater lagrede odds for neste kjøring
+        await storeOdds(alertKey, c.odds);
+
         const stake  = kellyStake(BANKROLL, c.ourProb, c.odds);
         const evNOK  = Math.round((c.ourProb * c.odds - 1) * stake);
 
@@ -166,6 +196,7 @@ export async function GET(req: NextRequest) {
           edgePct:      relEdge * 100,
           stake,
           evNOK,
+          oddsMovement,
           alertKey,
         });
       }

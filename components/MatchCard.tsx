@@ -10,7 +10,7 @@ import {
 } from "@/lib/analysis-store";
 import { MAX_BOOKMAKER_MARGIN } from "@/lib/odds-api";
 import { getDrawdownStatus, DrawdownStatus } from "@/lib/drawdown";
-import { saveCLVBaseline, updateCLVRefresh } from "@/lib/clv-store";
+import { saveCLVBaseline, updateCLVRefresh, getCLVEntries } from "@/lib/clv-store";
 import { addPendingBet, getBetResults } from "@/lib/result-store";
 
 interface Props {
@@ -83,6 +83,8 @@ export default function MatchCard({
   const [fromCache, setFromCache] = useState(false);
   const [drawdown, setDrawdown] = useState<DrawdownStatus | null>(null);
   const [loggedBetIds, setLoggedBetIds] = useState<Set<string>>(new Set());
+  // market → CLV% (positiv = odds shortet = sharps inne, negativ = driftet)
+  const [movementMap, setMovementMap] = useState<Map<string, number>>(new Map());
 
   // Last inn lagret analyse ved oppstart
   useEffect(() => {
@@ -101,11 +103,18 @@ export default function MatchCard({
     setDrawdown(getDrawdownStatus(bankroll));
   }, [bankroll]);
 
-  // Sync hvilke bets som allerede er logget
+  // Sync logged bets + odds movement fra localStorage (begge client-only)
   useEffect(() => {
-    const ids = new Set(getBetResults().map(r => r.id));
-    setLoggedBetIds(ids);
-  }, [analysis]);
+    setLoggedBetIds(new Set(getBetResults().map(r => r.id)));
+    // CLV-entries for denne kampen: positiv clvPct = shortet = bullish
+    const mvMap = new Map<string, number>();
+    for (const e of getCLVEntries()) {
+      if (e.matchKey === matchKey && e.clvPct !== null) {
+        mvMap.set(e.market, e.clvPct);
+      }
+    }
+    setMovementMap(mvMap);
+  }, [analysis, matchKey]);
 
   async function runAnalysis(forceRefresh = false) {
     // Bruk cache hvis tilgjengelig og ikke tvungen oppdatering
@@ -434,7 +443,7 @@ export default function MatchCard({
                           {bet.confidence}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
                         <span className="text-green-400 font-bold text-sm">
                           +{bet.valueEdgePct}% edge
                         </span>
@@ -443,6 +452,30 @@ export default function MatchCard({
                             EV +{bet.evNOK} kr
                           </span>
                         )}
+                        {/* Odds movement — bare synlig etter en 🔄 refresh */}
+                        {(() => {
+                          const mv = movementMap.get(bet.market);
+                          if (mv === undefined || Math.abs(mv) < 2) return null;
+                          const shorten = mv > 0; // positiv CLV = odds kortet
+                          return (
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                                shorten
+                                  ? mv >= 5
+                                    ? "bg-green-950 text-green-300"
+                                    : "bg-yellow-950 text-yellow-300"
+                                  : "bg-red-950 text-red-300"
+                              }`}
+                              title={shorten
+                                ? "Odds har kortet siden analyse — sharp-money bekrefter bettet"
+                                : "Odds har driftet — markedet er skeptisk til dette bettet"}
+                            >
+                              {shorten
+                                ? `📉 Shortet ${mv.toFixed(1)}%`
+                                : `📈 Driftet ${Math.abs(mv).toFixed(1)}%`}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
 

@@ -41,6 +41,11 @@ export interface TelegramAlert {
   edgePct: number;
   stake: number;
   evNOK: number;
+  /** % endring i odds siden siste scan-kjøring.
+   *  Negativ  = odds har kortet (sharps er inne) — bullish ✅
+   *  Positiv  = odds har driftet (markedet skeptisk) — advarsel ⚠️
+   *  null     = første gang vi ser dette bettet (ingen baseline) */
+  oddsMovement?: number | null;
 }
 
 export function buildAlertMessage(alerts: TelegramAlert[]): string {
@@ -61,6 +66,15 @@ export function buildAlertMessage(alerts: TelegramAlert[]): string {
       `📈 Edge: <b>+${a.edgePct.toFixed(1)}%</b>  |  ${(a.ourProb * 100).toFixed(0)}% vs ${(a.impliedProb * 100).toFixed(0)}% impl.`,
       `💵 Innsats: <b>${a.stake} kr</b>  |  EV: <b>+${a.evNOK} kr</b>`,
     );
+    // Odds movement — bare vis hvis vi har historikk (≥2% bevegelse)
+    if (a.oddsMovement !== null && a.oddsMovement !== undefined && Math.abs(a.oddsMovement) >= 2) {
+      const mv = a.oddsMovement;
+      if (mv < 0) {
+        lines.push(`📉 Shortet ${Math.abs(mv).toFixed(1)}% — <b>sharp-signal!</b> ✅`);
+      } else {
+        lines.push(`📈 Driftet ${mv.toFixed(1)}% — marked skeptisk ⚠️`);
+      }
+    }
     if (alerts.indexOf(a) < alerts.length - 1) lines.push("─────────────");
   }
 
