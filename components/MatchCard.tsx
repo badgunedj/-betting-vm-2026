@@ -11,6 +11,7 @@ import {
 import { MAX_BOOKMAKER_MARGIN } from "@/lib/odds-api";
 import { getDrawdownStatus, DrawdownStatus } from "@/lib/drawdown";
 import { saveCLVBaseline, updateCLVRefresh } from "@/lib/clv-store";
+import { addPendingBet, getBetResults } from "@/lib/result-store";
 
 interface Props {
   homeTeam: string;
@@ -81,6 +82,7 @@ export default function MatchCard({
   const [open, setOpen] = useState(false);
   const [fromCache, setFromCache] = useState(false);
   const [drawdown, setDrawdown] = useState<DrawdownStatus | null>(null);
+  const [loggedBetIds, setLoggedBetIds] = useState<Set<string>>(new Set());
 
   // Last inn lagret analyse ved oppstart
   useEffect(() => {
@@ -98,6 +100,12 @@ export default function MatchCard({
   useEffect(() => {
     setDrawdown(getDrawdownStatus(bankroll));
   }, [bankroll]);
+
+  // Sync hvilke bets som allerede er logget
+  useEffect(() => {
+    const ids = new Set(getBetResults().map(r => r.id));
+    setLoggedBetIds(ids);
+  }, [analysis]);
 
   async function runAnalysis(forceRefresh = false) {
     // Bruk cache hvis tilgjengelig og ikke tvungen oppdatering
@@ -169,6 +177,23 @@ export default function MatchCard({
     } finally {
       setLoading(false);
     }
+  }
+
+  function logBet(bet: BetSuggestion) {
+    addPendingBet({
+      matchKey,
+      homeTeam,
+      awayTeam,
+      matchDate: date,
+      market: bet.market,
+      bookmaker: bet.bookmaker,
+      odds: bet.odds,
+      stake: bet.recommendedStake,
+      ourProbability: bet.ourProbability,
+      valueEdgePct: bet.valueEdgePct,
+      evNOK: bet.evNOK,
+    });
+    setLoggedBetIds(prev => new Set([...prev, `${matchKey}_${bet.market}`]));
   }
 
   return (
@@ -442,15 +467,34 @@ export default function MatchCard({
                       </div>
                     </div>
 
-                    <a
-                      href={BOOKMAKER_LINKS[bet.bookmaker] ?? "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block w-full text-center py-2 rounded-lg bg-green-700 hover:bg-green-600
-                        text-white text-sm font-semibold transition-colors"
-                    >
-                      Bet på {BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker} →
-                    </a>
+                    <div className="flex gap-2">
+                      <a
+                        href={BOOKMAKER_LINKS[bet.bookmaker] ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-center py-2 rounded-lg bg-green-700 hover:bg-green-600
+                          text-white text-sm font-semibold transition-colors"
+                      >
+                        Bet på {BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker} →
+                      </a>
+                      {loggedBetIds.has(`${matchKey}_${bet.market}`) ? (
+                        <div className="px-3 py-2 rounded-lg bg-green-950 border border-green-800
+                          text-green-400 text-sm font-semibold whitespace-nowrap"
+                          title="Logget som pending">
+                          ✅ Logget
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => logBet(bet)}
+                          className="px-3 py-2 rounded-lg border border-[#2a2d3a] text-[#64748b]
+                            hover:text-white hover:border-purple-700 hover:bg-purple-950
+                            text-sm font-semibold transition-colors whitespace-nowrap"
+                          title="Logg dette bettet som pending — oppdater utfallet i Historikk"
+                        >
+                          📝 Logg
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

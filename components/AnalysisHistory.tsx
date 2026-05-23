@@ -8,6 +8,7 @@ import {
   analysisCount,
 } from "@/lib/analysis-store";
 import { getCLVStats, getCLVEntries, clearCLVEntries, CLVEntry } from "@/lib/clv-store";
+import { getBetResults, getPnLStats, resolveBet, clearResults, BetResult, PnLStats } from "@/lib/result-store";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("nb-NO", {
@@ -33,10 +34,16 @@ export default function AnalysisHistory() {
   const [filter, setFilter] = useState("");
   const [clvEntries, setCLVEntries] = useState<CLVEntry[]>([]);
   const [showCLV, setShowCLV] = useState(false);
+  const [betResults, setBetResults] = useState<BetResult[]>([]);
+  const [pnlStats, setPnlStats] = useState<PnLStats | null>(null);
+  const [showResults, setShowResults] = useState(false);
 
   const reload = () => {
     setAnalyses(getAllAnalyses());
     setCLVEntries(getCLVEntries());
+    const results = getBetResults();
+    setBetResults(results);
+    setPnlStats(getPnLStats());
   };
 
   useEffect(() => { reload(); }, []);
@@ -103,8 +110,9 @@ export default function AnalysisHistory() {
       {/* Statistikk-rad */}
       {(() => {
         const clvStats = getCLVStats();
+        const pl = pnlStats;
         return (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="rounded-xl bg-[#1a1d27] border border-[#2a2d3a] p-3 text-center">
               <p className="text-2xl font-bold text-white">{analyses.length}</p>
               <p className="text-xs text-[#64748b]">Analyser</p>
@@ -137,6 +145,27 @@ export default function AnalysisHistory() {
                 <>
                   <p className="text-2xl font-bold text-[#64748b]">—</p>
                   <p className="text-xs text-[#64748b]">CLV ({clvStats.total} logget)</p>
+                </>
+              )}
+            </div>
+            {/* P&L-stat */}
+            <div
+              className="rounded-xl border p-3 text-center cursor-pointer transition-colors
+                border-purple-900 bg-[#0d0d20] hover:bg-[#12122a]"
+              onClick={() => setShowResults(!showResults)}
+              title="Klikk for å se bet-resultater og P&L"
+            >
+              {pl && pl.total > 0 ? (
+                <>
+                  <p className={`text-2xl font-bold ${pl.totalProfit >= 0 ? "text-purple-400" : "text-red-400"}`}>
+                    {pl.totalProfit >= 0 ? "+" : ""}{pl.totalProfit} kr
+                  </p>
+                  <p className="text-xs text-[#64748b]">P&L ({pl.total} bet{pl.total !== 1 ? "s" : ""})</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-2xl font-bold text-[#64748b]">—</p>
+                  <p className="text-xs text-[#64748b]">P&L (0 bets)</p>
                 </>
               )}
             </div>
@@ -188,6 +217,117 @@ export default function AnalysisHistory() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* P&L-panel */}
+      {showResults && (
+        <div className="rounded-xl border border-purple-900 bg-[#0d0d20] p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-purple-400 font-semibold uppercase tracking-wider">
+              📊 Bet-resultater &amp; P&amp;L
+            </p>
+            <button
+              onClick={() => { clearResults(); reload(); }}
+              className="text-xs text-red-500 hover:text-red-400"
+            >
+              🗑 Nullstill
+            </button>
+          </div>
+
+          {/* Mini-statistikk */}
+          {pnlStats && pnlStats.total > 0 && (
+            <div className="grid grid-cols-4 gap-2 mb-4 text-center">
+              <div className="rounded-lg bg-[#1a1d27] p-2">
+                <p className="text-lg font-bold text-green-400">{pnlStats.won}</p>
+                <p className="text-xs text-[#64748b]">Vant</p>
+              </div>
+              <div className="rounded-lg bg-[#1a1d27] p-2">
+                <p className="text-lg font-bold text-red-400">{pnlStats.lost}</p>
+                <p className="text-xs text-[#64748b]">Tapte</p>
+              </div>
+              <div className="rounded-lg bg-[#1a1d27] p-2">
+                <p className={`text-lg font-bold ${pnlStats.roi !== null && pnlStats.roi >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {pnlStats.roi !== null ? `${pnlStats.roi >= 0 ? "+" : ""}${pnlStats.roi}%` : "—"}
+                </p>
+                <p className="text-xs text-[#64748b]">ROI</p>
+              </div>
+              <div className="rounded-lg bg-[#1a1d27] p-2">
+                <p className={`text-lg font-bold font-mono ${pnlStats.totalProfit >= 0 ? "text-purple-400" : "text-red-400"}`}>
+                  {pnlStats.totalProfit >= 0 ? "+" : ""}{pnlStats.totalProfit}
+                </p>
+                <p className="text-xs text-[#64748b]">NOK</p>
+              </div>
+            </div>
+          )}
+
+          {betResults.length === 0 ? (
+            <p className="text-xs text-[#64748b] text-center py-4">
+              Ingen bets logget ennå. Trykk 📝 Logg på et betsforslag for å spore utfall.
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {betResults.map(r => (
+                <div key={r.id}
+                  className="flex items-center justify-between text-xs py-2 border-b border-[#1a1a30] last:border-0">
+                  <div className="flex-1 min-w-0 mr-2">
+                    <p className="text-white font-medium truncate">
+                      {r.homeTeam} vs {r.awayTeam}
+                    </p>
+                    <p className="text-[#64748b]">
+                      {r.market} · {r.odds.toFixed(2)} · {r.stake} kr
+                      {r.outcome === "pending" && (
+                        <span className="ml-2 text-yellow-500">⏳ pending</span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-1">
+                    {r.outcome === "pending" ? (
+                      <>
+                        <button
+                          onClick={() => { resolveBet(r.id, "won"); reload(); }}
+                          className="px-2 py-1 rounded bg-green-900 hover:bg-green-700
+                            text-green-300 font-bold transition-colors"
+                          title="Vant"
+                        >
+                          V
+                        </button>
+                        <button
+                          onClick={() => { resolveBet(r.id, "lost"); reload(); }}
+                          className="px-2 py-1 rounded bg-red-900 hover:bg-red-700
+                            text-red-300 font-bold transition-colors"
+                          title="Tapte"
+                        >
+                          T
+                        </button>
+                        <button
+                          onClick={() => { resolveBet(r.id, "void"); reload(); }}
+                          className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700
+                            text-slate-300 transition-colors"
+                          title="Void / annullert"
+                        >
+                          ∅
+                        </button>
+                      </>
+                    ) : (
+                      <span className={`px-2 py-1 rounded font-bold
+                        ${r.outcome === "won"
+                          ? "bg-green-900 text-green-300"
+                          : r.outcome === "lost"
+                          ? "bg-red-900 text-red-300"
+                          : "bg-slate-800 text-slate-400"}`}>
+                        {r.outcome === "won"
+                          ? `+${r.profit} kr`
+                          : r.outcome === "lost"
+                          ? `${r.profit} kr`
+                          : "VOID"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
