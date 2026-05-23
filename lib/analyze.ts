@@ -45,6 +45,7 @@ export async function analyzeMatch(
   awayInjuryStr: string = "",
   newsStr: string = "",
 ): Promise<MatchAnalysis> {
+  const pin = odds.pinnacleRef;
 
   // ── Bookmaker-konsensus (fjern margin) ──
   // KRITISK: filtrer bort bookmakers med draw=0 (unngå 1/0=Infinity som ødelegger alt)
@@ -108,6 +109,35 @@ export async function analyzeMatch(
 - Differanse: ${(elo.eloDiff ?? 0) > 0 ? "+" : ""}${(elo.eloDiff ?? 0).toFixed(0)} → ELO-vinnsjanse: ${pct(elo.eloHomeWinProb ?? 0)}`
     : "";
 
+  // ── Pinnacle-referanselinje ──
+  // Pinnacle = verdens skarpeste bookmaker (~4-5% margin). Deres normaliserte
+  // sannsynligheter er den beste frie proxy for "sann" markedspris.
+  const pinnacleSection = pin
+    ? (() => {
+        const pct2 = (n: number) => `${(n * 100).toFixed(1)}%`;
+        // Sammenlign Pinnacle-probs mot vår Poisson-modell
+        const pSignals: string[] = [];
+        if (poisson) {
+          const hDiff = poisson.homeWin - pin.homeProb;
+          const dDiff = poisson.draw    - pin.drawProb;
+          const aDiff = poisson.awayWin - pin.awayProb;
+          if (Math.abs(hDiff) >= 0.04)
+            pSignals.push(`Hjemme: Poisson ${hDiff > 0 ? "+" : ""}${(hDiff*100).toFixed(1)}pp vs Pinnacle`);
+          if (Math.abs(dDiff) >= 0.04)
+            pSignals.push(`Uavgjort: Poisson ${dDiff > 0 ? "+" : ""}${(dDiff*100).toFixed(1)}pp vs Pinnacle`);
+          if (Math.abs(aDiff) >= 0.04)
+            pSignals.push(`Borte: Poisson ${aDiff > 0 ? "+" : ""}${(aDiff*100).toFixed(1)}pp vs Pinnacle`);
+        }
+        return `\n📌 PINNACLE REFERANSE (skarpest i verden, margin ${(pin.margin*100).toFixed(1)}%):
+- Odds:  1=${pin.homeWin.toFixed(2)}  X=${pin.draw > 0 ? pin.draw.toFixed(2) : "-"}  2=${pin.awayWin.toFixed(2)}
+- Sann prob (margin fjernet): Hjemme ${pct2(pin.homeProb)} | Uavgjort ${pct2(pin.drawProb)} | Borte ${pct2(pin.awayProb)}${
+          pSignals.length > 0
+            ? `\n- Modell vs Pinnacle: ${pSignals.join(" | ")}`
+            : "\n- Modell og Pinnacle er på linje (ingen stor divergens)"
+        }`;
+      })()
+    : "";
+
   // ── Værseksjon ──
   const weatherSection = weather
     ? `\nVÆR PÅ KAMPDAG: ${weather.description}${weather.lowGoalRisk ? " ⚠️ Lav-mål-risiko" : ""}`
@@ -125,17 +155,20 @@ export async function analyzeMatch(
 
   const hasGoodData = poisson !== null || (elo?.homeElo != null);
 
-  // Pre-compute sterkeste signal (for prompt-highlight)
+  // Pre-compute sterkeste signal — dobbelt konfirmert hvis Pinnacle er enig
   const topSignal = (() => {
     if (!poisson) return "";
-    const signals: { label: string; diff: number }[] = [
-      { label: `Hjemmeseier (${pct(poisson.homeWin)} vs ${pct(mktHome)})`, diff: poisson.homeWin - mktHome },
-      { label: `Uavgjort (${pct(poisson.draw)} vs ${pct(mktDraw)})`,       diff: poisson.draw    - mktDraw },
-      { label: `Borteseier (${pct(poisson.awayWin)} vs ${pct(mktAway)})`,  diff: poisson.awayWin - mktAway },
+    const signals: { label: string; diff: number; pinDiff?: number }[] = [
+      { label: `Hjemmeseier (${pct(poisson.homeWin)} vs ${pct(mktHome)})`, diff: poisson.homeWin - mktHome, pinDiff: pin ? poisson.homeWin - pin.homeProb : undefined },
+      { label: `Uavgjort (${pct(poisson.draw)} vs ${pct(mktDraw)})`,       diff: poisson.draw    - mktDraw, pinDiff: pin ? poisson.draw    - pin.drawProb : undefined },
+      { label: `Borteseier (${pct(poisson.awayWin)} vs ${pct(mktAway)})`,  diff: poisson.awayWin - mktAway, pinDiff: pin ? poisson.awayWin - pin.awayProb : undefined },
     ];
     const best = signals.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))[0];
     if (Math.abs(best.diff) < 0.04) return "";
-    return `\n⚡ STERKESTE SIGNAL: ${best.label} — modell ${best.diff > 0 ? "HØYERE" : "LAVERE"} enn marked med ${Math.abs(best.diff * 100).toFixed(1)}pp`;
+    // Dobbelt-konfirmert: Poisson OG Pinnacle peker samme retning
+    const pinConfirmed = best.pinDiff !== undefined && Math.sign(best.pinDiff) === Math.sign(best.diff) && Math.abs(best.pinDiff) >= 0.03;
+    const badge = pinConfirmed ? "🔥 DOBBELT BEKREFTET (Poisson + Pinnacle)" : "⚡ MODELL-SIGNAL";
+    return `\n${badge}: ${best.label} — modell ${best.diff > 0 ? "HØYERE" : "LAVERE"} enn marked med ${Math.abs(best.diff * 100).toFixed(1)}pp${pinConfirmed ? ` | Pinnacle enig (+${Math.abs((best.pinDiff ?? 0) * 100).toFixed(1)}pp)` : ""}`;
   })();
 
   const prompt = `Du er en kvantitativ fotballanalytiker. Du estimerer RIKTIGE sannsynligheter og identifiserer value.
@@ -143,7 +176,7 @@ export async function analyzeMatch(
 KAMP: ${homeTeam} vs ${awayTeam}
 ${topSignal}
 
-═══ STATISTISKE MODELLER ═══${poissonSection}${eloSection}
+═══ STATISTISKE MODELLER ═══${poissonSection}${eloSection}${pinnacleSection}
 
 ═══ MARKEDETS KONSENSUS (uten bookmaker-margin) ═══
 - Hjemmeseier: ${pct(mktHome)} | Uavgjort: ${pct(mktDraw)} | Borteseier: ${pct(mktAway)}${mktOver ? ` | Over 2.5: ${pct(mktOver)}` : ""}${mktUnder ? ` | Under 2.5: ${pct(mktUnder)}` : ""}
@@ -265,8 +298,20 @@ Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
     if (!isFinite(edge) || isNaN(edge) || edge < relThreshold) continue;
     if (absoluteEdge < absThreshold) continue;
 
+    // Pinnacle-konfirmasjon: sjekk om Pinnacle er enig med vår modell
+    const pinProb = (() => {
+      if (!pin) return null;
+      if (c.market.includes("Hjemme")) return pin.homeProb;
+      if (c.market.includes("Uavgjort")) return pin.drawProb;
+      if (c.market.includes("Borte")) return pin.awayProb;
+      return null;
+    })();
+    // Dobbelt bekreftet: vår prob > Pinnacle prob > implied prob (alle peker samme vei)
+    const pinnacleConfirmed = pinProb !== null && pinProb > impliedProb && ourProb > pinProb;
+
     const confidence: BetSuggestion["confidence"] =
-      edge > 0.15 && absoluteEdge > 0.07 ? "HØY"
+      pinnacleConfirmed && absoluteEdge > 0.05 ? "HØY"   // Poisson + Pinnacle begge over bookmaker
+      : edge > 0.15 && absoluteEdge > 0.07 ? "HØY"
       : edge > 0.09 && absoluteEdge > 0.05 ? "MEDIUM"
       : "LAV";
 

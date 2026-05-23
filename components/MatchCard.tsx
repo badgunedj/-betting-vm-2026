@@ -232,29 +232,58 @@ export default function MatchCard({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#2a2d3a]">
-                {odds.bookmakers.map((bk) => (
-                  <tr key={bk.bookmaker} className="hover:bg-[#1e293b] transition-colors">
-                    <td className="py-2 font-medium">
-                      {BOOKMAKER_NAMES[bk.bookmaker] ?? bk.bookmaker}
-                    </td>
-                    <td className={`text-center py-2 font-mono ${bk.homeWin === odds.bestHomeWin.odds ? "text-green-400 font-bold" : ""}`}>
-                      {bk.homeWin.toFixed(2)}
-                    </td>
-                    <td className={`text-center py-2 font-mono ${bk.draw === odds.bestDraw.odds ? "text-green-400 font-bold" : ""}`}>
-                      {bk.draw > 0 ? bk.draw.toFixed(2) : "-"}
-                    </td>
-                    <td className={`text-center py-2 font-mono ${bk.awayWin === odds.bestAwayWin.odds ? "text-green-400 font-bold" : ""}`}>
-                      {bk.awayWin.toFixed(2)}
-                    </td>
-                    <td className={`text-center py-2 font-mono ${bk.over25 === odds.bestOver25?.odds ? "text-green-400 font-bold" : ""}`}>
-                      {bk.over25 ? bk.over25.toFixed(2) : "-"}
-                    </td>
-                  </tr>
-                ))}
+                {odds.bookmakers.map((bk) => {
+                  const isPinnacle = bk.bookmaker === "pinnacle";
+                  return (
+                    <tr
+                      key={bk.bookmaker}
+                      className={`transition-colors ${isPinnacle ? "bg-[#1a1a2e] border-l-2 border-blue-500" : "hover:bg-[#1e293b]"}`}
+                    >
+                      <td className="py-2 font-medium">
+                        <span>{BOOKMAKER_NAMES[bk.bookmaker] ?? bk.bookmaker}</span>
+                        {isPinnacle && (
+                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-950 text-blue-400 font-bold">
+                            📌 Referanse
+                          </span>
+                        )}
+                      </td>
+                      <td className={`text-center py-2 font-mono ${bk.homeWin === odds.bestHomeWin.odds && !isPinnacle ? "text-green-400 font-bold" : isPinnacle ? "text-blue-300" : ""}`}>
+                        {bk.homeWin.toFixed(2)}
+                      </td>
+                      <td className={`text-center py-2 font-mono ${bk.draw === odds.bestDraw.odds && !isPinnacle ? "text-green-400 font-bold" : isPinnacle ? "text-blue-300" : ""}`}>
+                        {bk.draw > 0 ? bk.draw.toFixed(2) : "-"}
+                      </td>
+                      <td className={`text-center py-2 font-mono ${bk.awayWin === odds.bestAwayWin.odds && !isPinnacle ? "text-green-400 font-bold" : isPinnacle ? "text-blue-300" : ""}`}>
+                        {bk.awayWin.toFixed(2)}
+                      </td>
+                      <td className={`text-center py-2 font-mono ${bk.over25 === odds.bestOver25?.odds && !isPinnacle ? "text-green-400 font-bold" : isPinnacle ? "text-blue-300" : ""}`}>
+                        {bk.over25 ? bk.over25.toFixed(2) : "-"}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-green-400 mt-2">↑ Grønt = beste odds</p>
+
+          {/* Pinnacle sannsynligheter (margin fjernet) */}
+          {odds.pinnacleRef && (
+            <div className="mt-3 p-3 rounded-lg bg-[#0d1225] border border-blue-900">
+              <p className="text-xs text-blue-400 font-semibold mb-1">
+                📌 Pinnacle "sann" sannsynlighet (margin {(odds.pinnacleRef.margin * 100).toFixed(1)}% fjernet)
+              </p>
+              <div className="flex gap-4 text-xs font-mono">
+                <span className="text-white">1: <span className="text-blue-300">{(odds.pinnacleRef.homeProb * 100).toFixed(1)}%</span></span>
+                <span className="text-white">X: <span className="text-blue-300">{(odds.pinnacleRef.drawProb * 100).toFixed(1)}%</span></span>
+                <span className="text-white">2: <span className="text-blue-300">{(odds.pinnacleRef.awayProb * 100).toFixed(1)}%</span></span>
+              </div>
+              <p className="text-xs text-[#64748b] mt-1">
+                Brukes internt som referanse — kan ikke bettes på fra Norge
+              </p>
+            </div>
+          )}
+
+          <p className="text-xs text-green-400 mt-2">↑ Grønt = beste odds du kan bette på</p>
         </div>
       )}
 

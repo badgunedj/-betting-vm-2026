@@ -10,6 +10,18 @@ export interface BookmakerOdds {
   under25: number | null;
 }
 
+// Pinnacle har verdens laveste margin (~4-5%) og regnes som "sann pris" av profesjonelle
+// Brukes som referanse for å vurdere edge — ikke for å plassere bet (blokkert i Norge)
+export interface PinnacleRef {
+  homeWin: number;   // råodds
+  draw: number;
+  awayWin: number;
+  homeProb: number;  // normalisert implisitt sannsynlighet (margin fjernet)
+  drawProb: number;
+  awayProb: number;
+  margin: number;    // bookmaker-margin, f.eks. 0.045 = 4.5%
+}
+
 export interface MatchOdds {
   matchId: string;
   homeTeam: string;
@@ -21,6 +33,7 @@ export interface MatchOdds {
   bestAwayWin: { odds: number; bookmaker: string };
   bestOver25:  { odds: number; bookmaker: string } | null;
   bestUnder25: { odds: number; bookmaker: string } | null;
+  pinnacleRef: PinnacleRef | null;   // null hvis Pinnacle ikke har odds for kampen
 }
 
 // Bookmakers tilgjengelig for norske spillere (oppdatert mai 2026)
@@ -143,6 +156,36 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       }
     }
 
+    // Trekk ut Pinnacle separat som referanselinje (skarpeste odds i verden)
+    // Normaliser probabilitetene slik at margin fjernes → "sann" markedspris
+    let pinnacleRef: PinnacleRef | null = null;
+    const pinBk = event.bookmakers?.find((b: { key: string }) => b.key === "pinnacle");
+    if (pinBk) {
+      const pinMkt = pinBk.markets?.find((m: { key: string }) => m.key === "h2h");
+      if (pinMkt) {
+        const pinOutcomes = pinMkt.outcomes ?? [];
+        const pH = pinOutcomes.find((o: { name: string }) => o.name === event.home_team)?.price;
+        const pA = pinOutcomes.find((o: { name: string }) => o.name === event.away_team)?.price;
+        const pD = pinOutcomes.find((o: { name: string }) => o.name === "Draw")?.price;
+        if (pH && pA) {
+          const rawH = 1 / pH;
+          const rawD = pD ? 1 / pD : 0;
+          const rawA = 1 / pA;
+          const total = rawH + rawD + rawA;
+          const margin = total - 1;
+          pinnacleRef = {
+            homeWin: pH,
+            draw:    pD ?? 0,
+            awayWin: pA,
+            homeProb: rawH / total,
+            drawProb: rawD / total,
+            awayProb: rawA / total,
+            margin,
+          };
+        }
+      }
+    }
+
     return {
       matchId: event.id,
       homeTeam: event.home_team,
@@ -154,6 +197,7 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       bestAwayWin: best("awayWin"),
       bestOver25:  totals ? { odds: totals.over,  bookmaker: totals.bk } : null,
       bestUnder25: bestUnder,
+      pinnacleRef,
     };
   });
 }
