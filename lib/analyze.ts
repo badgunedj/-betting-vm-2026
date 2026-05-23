@@ -211,10 +211,17 @@ Svar KUN i dette JSON-formatet:
     if (!bookOdds || bookOdds <= 1 || !ourProb || ourProb <= 0 || ourProb >= 1) continue;
 
     const edge = valueEdge(ourProb, bookOdds);
-    if (!isFinite(edge) || isNaN(edge) || edge < 0.03) continue;
+    const impliedProb = impliedProbability(bookOdds);
+    const absoluteEdge = ourProb - impliedProb; // prosentpoeng absolutt differanse
+
+    // Krev BÅDE relativ (5%) OG absolutt (3 pp) edge for å unngå falske signal på høye odds
+    if (!isFinite(edge) || isNaN(edge) || edge < 0.05) continue;
+    if (absoluteEdge < 0.03) continue; // min 3 prosentpoeng absolutt
 
     const confidence: BetSuggestion["confidence"] =
-      edge > 0.12 ? "HØY" : edge > 0.06 ? "MEDIUM" : "LAV";
+      edge > 0.15 && absoluteEdge > 0.06 ? "HØY"
+      : edge > 0.08 && absoluteEdge > 0.04 ? "MEDIUM"
+      : "LAV";
 
     bets.push({
       market: c.market,
