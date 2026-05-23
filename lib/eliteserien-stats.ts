@@ -11,6 +11,10 @@ export interface EliteserienTeamStats {
   goalsFor: number;
   goalsAgainst: number;
   form: string; // siste resultater, f.eks. "WWLDW"
+  /** Expected Goals per kamp (fbref 2026, oppdatert 23. mai).
+   *  Mer stabilt enn faktiske mål fordi det filtrerer flaks/uflaks. */
+  xgFor?: number;
+  xgAgainst?: number;
 }
 
 // Hardkodet tabell per 22. mai 2026 — brukes som fallback
@@ -32,6 +36,29 @@ const HARDCODED_2026: Record<string, EliteserienTeamStats> = {
   "KFUM Oslo":      { teamName: "KFUM Oslo",        played: 9,  wins: 2, draws: 2, losses: 5, goalsFor: 10, goalsAgainst: 17, form: "LLLWL" },
   "Rosenborg":      { teamName: "Rosenborg",        played: 9,  wins: 2, draws: 2, losses: 5, goalsFor: 7,  goalsAgainst: 14, form: "DWLLL" },
   "IK Start":       { teamName: "IK Start",         played: 10, wins: 0, draws: 4, losses: 6, goalsFor: 10, goalsAgainst: 26, form: "DLDDL" },
+};
+
+// Expected Goals per kamp (fbref Eliteserien 2026, oppdatert 23. mai 2026)
+// Kilde: fbref.com/en/comps/40/2026/stats/2026-Eliteserien-Stats
+// Disse er per-kamp gjennomsnitt og er mer stabile enn faktiske mål.
+// Oppdater ved sesongstart og midtveis (~runde 15).
+const XG_2026: Record<string, { xgFor: number; xgAgainst: number }> = {
+  "Viking":       { xgFor: 2.20, xgAgainst: 1.00 },
+  "Bodø/Glimt":   { xgFor: 2.00, xgAgainst: 1.00 },
+  "Tromsø":       { xgFor: 1.55, xgAgainst: 1.30 },
+  "Lillestrøm":   { xgFor: 1.55, xgAgainst: 1.05 },
+  "Molde":        { xgFor: 1.70, xgAgainst: 1.20 },
+  "SK Brann":     { xgFor: 1.90, xgAgainst: 1.40 },
+  "HamKam":       { xgFor: 1.40, xgAgainst: 1.60 },
+  "Sandefjord":   { xgFor: 0.90, xgAgainst: 1.20 },
+  "Vålerenga":    { xgFor: 1.15, xgAgainst: 1.60 },
+  "Kristiansund": { xgFor: 1.05, xgAgainst: 1.45 },
+  "Fredrikstad":  { xgFor: 1.30, xgAgainst: 1.80 },
+  "Aalesund":     { xgFor: 1.30, xgAgainst: 1.70 },
+  "Sarpsborg 08": { xgFor: 1.00, xgAgainst: 1.50 },
+  "KFUM Oslo":    { xgFor: 1.10, xgAgainst: 1.70 },
+  "Rosenborg":    { xgFor: 0.85, xgAgainst: 1.55 },
+  "IK Start":     { xgFor: 1.00, xgAgainst: 2.50 },
 };
 
 // football-data.co.uk CSV-navner → our team names
@@ -152,19 +179,37 @@ export async function getEliteserienStats(): Promise<Map<string, EliteserienTeam
   return fallback;
 }
 
+/** Slå opp xG for et lag — prøver eksakt navn, deretter delvis match */
+function lookupXG(teamName: string): { xgFor: number; xgAgainst: number } | null {
+  if (XG_2026[teamName]) return XG_2026[teamName];
+  const lower = teamName.toLowerCase();
+  for (const [key, val] of Object.entries(XG_2026)) {
+    if (key.toLowerCase() === lower) return val;
+    if (key.toLowerCase().includes(lower) || lower.includes(key.toLowerCase())) return val;
+  }
+  return null;
+}
+
+/** Slå opp xG og merge inn i statistikken */
+function withXG(s: EliteserienTeamStats): EliteserienTeamStats {
+  const xg = lookupXG(s.teamName);
+  return xg ? { ...s, xgFor: xg.xgFor, xgAgainst: xg.xgAgainst } : s;
+}
+
 export async function getTeamStats2026(teamName: string): Promise<EliteserienTeamStats | null> {
   const stats = await getEliteserienStats();
 
   // Direkte match
-  if (stats.has(teamName)) return stats.get(teamName)!;
+  if (stats.has(teamName)) return withXG(stats.get(teamName)!);
 
   // Case-insensitive + delvis match
   const lower = teamName.toLowerCase();
   for (const [key, val] of stats.entries()) {
-    if (key.toLowerCase() === lower) return val;
-    if (key.toLowerCase().includes(lower) || lower.includes(key.toLowerCase())) return val;
+    if (key.toLowerCase() === lower) return withXG(val);
+    if (key.toLowerCase().includes(lower) || lower.includes(key.toLowerCase())) return withXG(val);
   }
 
   // Fallback til hardkodet
-  return HARDCODED_2026[teamName] ?? null;
+  const fallback = HARDCODED_2026[teamName] ?? null;
+  return fallback ? withXG(fallback) : null;
 }

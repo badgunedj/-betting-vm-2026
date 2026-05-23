@@ -149,8 +149,9 @@ export async function POST(req: NextRequest) {
     const homeForm = homeFormFromStats;
     const awayForm = awayFormFromStats;
 
-    // Poisson-modell fra 2026-sesongstatistikk (med form-vekting)
+    // Poisson-modell fra 2026-sesongstatistikk (med form-vekting og xG når tilgjengelig)
     let poissonPred = null;
+    let usedXG = false;
     if (homeForm && awayForm && homeForm.played >= 3 && awayForm.played >= 3) {
       const eg = expectedGoalsFromForm(
         homeForm.goalsFor, homeForm.goalsAgainst, homeForm.played,
@@ -158,10 +159,24 @@ export async function POST(req: NextRequest) {
         1.48,
         homeForm.form ?? "",
         awayForm.form ?? "",
-        homeCongestion?.factor ?? 1.0,   // fatigue-koeffisient
+        homeCongestion?.factor ?? 1.0,
         awayCongestion?.factor ?? 1.0,
+        homeStats2026?.xgFor,        // xG foretrekkes fremfor faktiske mål
+        homeStats2026?.xgAgainst,
+        awayStats2026?.xgFor,
+        awayStats2026?.xgAgainst,
       );
-      if (eg) poissonPred = poissonPredict(eg.expectedHome, eg.expectedAway);
+      if (eg) {
+        poissonPred = poissonPredict(eg.expectedHome, eg.expectedAway);
+        usedXG = eg.usedXG;
+      }
+    }
+
+    // Legg til xG-kilde-info i kontekst
+    if (usedXG) {
+      newsLines.unshift(
+        `📊 Poisson-modell bruker xG (Expected Goals) som angrepsstyrke — filtrerer ut flaks/uflaks fra faktiske mål.`
+      );
     }
 
     const analysis = await analyzeMatch(

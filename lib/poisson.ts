@@ -123,14 +123,27 @@ export function expectedGoalsFromForm(
   awayFormStr: string = "",
   homeFatigue: number = 1.0,   // < 1.0 = slitent lag (fixture congestion)
   awayFatigue: number = 1.0,
-): { expectedHome: number; expectedAway: number } | null {
+  /** Optional: xG per kamp (fbref). Brukes fremfor faktiske mål når tilgjengelig —
+   *  filtrerer ut flaks/uflaks og gir en mer stabil styrkeestimering. */
+  homeXgFor?: number,
+  homeXgAgainst?: number,
+  awayXgFor?: number,
+  awayXgAgainst?: number,
+): { expectedHome: number; expectedAway: number; usedXG: boolean } | null {
   if (homePlayed < 3 || awayPlayed < 3) return null;
 
-  // Angrepsstyrke = mål scoret per kamp / ligasnitt
-  const homeAttack  = (homeGoalsFor     / homePlayed) / leagueAvg;
-  const homeDefense = (homeGoalsAgainst / homePlayed) / leagueAvg;
-  const awayAttack  = (awayGoalsFor     / awayPlayed) / leagueAvg;
-  const awayDefense = (awayGoalsAgainst / awayPlayed) / leagueAvg;
+  // Foretrekk xG når tilgjengelig — mer stabil enn faktiske mål (fjerner flaks-støy)
+  const usedXG = !!(homeXgFor || awayXgFor);
+  const homeGF = homeXgFor  ?? (homeGoalsFor     / homePlayed);
+  const homeGA = homeXgAgainst ?? (homeGoalsAgainst / homePlayed);
+  const awayGF = awayXgFor  ?? (awayGoalsFor     / awayPlayed);
+  const awayGA = awayXgAgainst ?? (awayGoalsAgainst / awayPlayed);
+
+  // Angrepsstyrke = mål/xG per kamp relativt til ligasnitt
+  const homeAttack  = homeGF / leagueAvg;
+  const homeDefense = homeGA / leagueAvg;
+  const awayAttack  = awayGF / leagueAvg;
+  const awayDefense = awayGA / leagueAvg;
 
   // Form-vekting: nylige resultater justerer angrepsstyrken ±12%
   const homeFM = formMultiplier(homeFormStr);
@@ -144,5 +157,6 @@ export function expectedGoalsFromForm(
   return {
     expectedHome: Math.max(0.3, Math.min(4.0, expectedHome)),
     expectedAway: Math.max(0.1, Math.min(3.0, expectedAway)),
+    usedXG,
   };
 }

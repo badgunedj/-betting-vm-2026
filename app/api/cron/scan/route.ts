@@ -124,6 +124,9 @@ export async function GET(req: NextRequest) {
             hStats.goalsFor, hStats.goalsAgainst, hStats.played,
             aStats.goalsFor, aStats.goalsAgainst, aStats.played,
             1.48, hStats.form ?? "", aStats.form ?? "",
+            1.0, 1.0,           // fatigue (ikke tilgjengelig i scanner — defaulter til 1.0)
+            hStats.xgFor, hStats.xgAgainst,
+            aStats.xgFor, aStats.xgAgainst,
           );
           if (eg) {
             const pred = poissonPredict(eg.expectedHome, eg.expectedAway);
@@ -134,6 +137,7 @@ export async function GET(req: NextRequest) {
             ourBttsYes = pred.bttsYes;
             expHome    = eg.expectedHome;
             expAway    = eg.expectedAway;
+            if (eg.usedXG) console.log(`[xG] ${match.homeTeam} vs ${match.awayTeam}: using xG`);
           }
         }
       } else {
