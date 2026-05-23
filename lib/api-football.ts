@@ -68,13 +68,13 @@ export async function getUpcomingFixtures(): Promise<Fixture[]> {
   );
 }
 
-// Hent lagstatistikk og form
+// Hent lagstatistikk og form — bruker 2025 (siste sesong på gratis plan)
 export async function getTeamForm(
   teamId: number,
   leagueId: number
 ): Promise<TeamForm | null> {
   const res = await fetch(
-    `${BASE_URL}/teams/statistics?team=${teamId}&league=${leagueId}&season=2026`,
+    `${BASE_URL}/teams/statistics?team=${teamId}&league=${leagueId}&season=2025`,
     { headers, next: { revalidate: 3600 } }
   );
   const data = await res.json();

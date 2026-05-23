@@ -13,6 +13,7 @@ interface Props {
   date: string;
   sport: string;
   bankroll: number;
+  preloadedOdds?: MatchOdds | null;
 }
 
 const BOOKMAKER_LINKS: Record<string, string> = {
@@ -57,10 +58,10 @@ function FormDots({ form }: { form: string }) {
 
 export default function MatchCard({
   homeTeam, awayTeam, homeTeamId, awayTeamId,
-  leagueId, leagueName, date, sport, bankroll,
+  leagueId, leagueName, date, sport, bankroll, preloadedOdds,
 }: Props) {
   const [analysis, setAnalysis] = useState<MatchAnalysis | null>(null);
-  const [odds, setOdds] = useState<MatchOdds | null>(null);
+  const [odds, setOdds] = useState<MatchOdds | null>(preloadedOdds ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -73,8 +74,8 @@ export default function MatchCard({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          homeTeam, awayTeam, homeTeamId, awayTeamId,
-          leagueId, sport, bankroll,
+          homeTeam, awayTeam, bankroll,
+          odds: preloadedOdds, // send odds direkte — ingen re-fetch
         }),
       });
       const data = await res.json();

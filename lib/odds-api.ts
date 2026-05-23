@@ -46,7 +46,8 @@ export function kellyStake(
   const q = 1 - ourProb;
   const kelly = (b * ourProb - q) / b;
   const stake = Math.max(0, kelly * fraction * bankroll);
-  return Math.round(stake / 50) * 50; // rund til nærmeste 50 kr
+  if (stake < 25) return 50; // minimum bet
+  return Math.round(stake / 25) * 25; // rund til nærmeste 25 kr
 }
 
 // Hent odds fra The Odds API

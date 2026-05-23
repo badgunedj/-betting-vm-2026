@@ -2,16 +2,18 @@
 import { useState, useEffect } from "react";
 import MatchCard from "@/components/MatchCard";
 import BankrollTracker from "@/components/BankrollTracker";
+import { MatchOdds } from "@/lib/odds-api";
 
 type Tab = "eliteserien" | "worldcup" | "logg";
 
 interface Fixture {
-  fixture: { id: number; date: string };
+  fixture: { id: string | number; date: string };
   league: { id: number; name: string };
   teams: {
     home: { id: number; name: string; logo: string };
     away: { id: number; name: string; logo: string };
   };
+  odds?: MatchOdds;
 }
 
 const LEAGUE_TO_SPORT: Record<number, string> = {
@@ -121,6 +123,7 @@ function MatchList({
           date={f.fixture.date}
           sport={sport}
           bankroll={bankroll}
+          preloadedOdds={f.odds ?? null}
         />
       ))}
     </div>

@@ -2,7 +2,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { TeamForm, H2HRecord } from "./api-football";
 import { MatchOdds, impliedProbability, kellyStake, valueEdge } from "./odds-api";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Klient lages ved kall-tidspunkt slik at env-variabelen er tilgjengelig
+function getClient() {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_KEY });
+}
 
 export interface BetSuggestion {
   market: string;
@@ -51,33 +54,52 @@ export async function analyzeMatch(
     .map((m) => `${m.date}: ${m.homeTeam} ${m.homeGoals}-${m.awayGoals} ${m.awayTeam}`)
     .join("\n");
 
-  const prompt = `Du er en ekspert fotballanalytiker og value-better. Analyser denne kampen og finn bets med positiv expected value (EV).
+  // Beregn bookmaker-konsensus (fjern margin ~5%) som ankerpunkt
+  const bkProbs = odds.bookmakers.slice(0, 3);
+  const avgHome = bkProbs.reduce((s,b) => s + 1/b.homeWin, 0) / bkProbs.length;
+  const avgDraw = bkProbs.reduce((s,b) => s + 1/b.draw, 0) / bkProbs.length;
+  const avgAway = bkProbs.reduce((s,b) => s + 1/b.awayWin, 0) / bkProbs.length;
+  const total = avgHome + avgDraw + avgAway;
+  const mktHome = (avgHome/total).toFixed(3);
+  const mktDraw = (avgDraw/total).toFixed(3);
+  const mktAway = (avgAway/total).toFixed(3);
+  const mktOver = odds.bestOver25 ? (1/odds.bestOver25.odds).toFixed(3) : "ukjent";
+
+  const hasForm = homeForm !== null || awayForm !== null;
+
+  const prompt = `Du er en profesjonell fotballanalytiker og value-better med fokus på norsk Eliteserien og VM.
 
 KAMP: ${homeTeam} vs ${awayTeam}
 
-FORM:
+MARKEDETS KONSENSUS (bookmaker-odds uten margin):
+- Hjemmeseier (${homeTeam}): ${mktHome} (${(parseFloat(mktHome)*100).toFixed(1)}%)
+- Uavgjort: ${mktDraw} (${(parseFloat(mktDraw)*100).toFixed(1)}%)
+- Borteseier (${awayTeam}): ${mktAway} (${(parseFloat(mktAway)*100).toFixed(1)}%)
+- Over 2.5 mål: ${mktOver}
+
+${hasForm ? `LAGFORM (sesong 2025):
 - ${homeTeam}: ${formStr(homeForm)}
-- ${awayTeam}: ${formStr(awayForm)}
+- ${awayTeam}: ${formStr(awayForm)}` : `MERK: Ingen form-data tilgjengelig. Bruk markedsprisene som primærkilde.`}
 
-H2H HISTORIKK (siste møter):
-${h2hStr || "Ingen historikk tilgjengelig"}
+H2H HISTORIKK:
+${h2hStr || "Ikke tilgjengelig"}
 
-ODDS FRA BOOKMAKERS:
+ODDS TILGJENGELIG:
 ${oddsStr}
-Beste odds Over 2.5: ${odds.bestOver25?.odds ?? "N/A"} (${odds.bestOver25?.bookmaker ?? "-"})
 
-OPPGAVE:
-1. Analyser kampens dynamikk basert på form, H2H og lagenes styrker
-2. Estimer din egen sannsynlighet for: Hjemmeseier, Uavgjort, Borteseier, Over 2.5 mål
-3. Sammenlikn med bookmakers implisitte sannsynlighet
-4. Anbefal KUN bets med positiv value (din prob > bookmaker impl. prob)
+INSTRUKSJONER:
+1. Bruk markedskonsensus som ANKERPUNKT — avvik krever sterk begrunnelse
+2. Juster kun 2-8 prosentpoeng fra markedet hvis du har konkret informasjon
+3. Uten form/H2H-data: hold deg svært nær markedsprisene
+4. Anbefal KUN bets der din sannsynlighet er minst 5% høyere enn markedets
+5. Vær konservativ — det er bedre å ikke bette enn å bette uten edge
 
-Svar i dette JSON-formatet:
+Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
 {
-  "summary": "2-3 setninger om kampens dynamikk",
-  "homeStrengths": ["styrke1", "styrke2"],
-  "awayStrengths": ["styrke1", "styrke2"],
-  "keyFactors": ["faktor1", "faktor2", "faktor3"],
+  "summary": "2-3 setninger om kampen og datagrunnlaget",
+  "homeStrengths": ["punkt1", "punkt2"],
+  "awayStrengths": ["punkt1", "punkt2"],
+  "keyFactors": ["faktor1", "faktor2"],
   "probabilities": {
     "homeWin": 0.XX,
     "draw": 0.XX,
@@ -86,7 +108,7 @@ Svar i dette JSON-formatet:
   }
 }`;
 
-  const response = await client.messages.create({
+  const response = await getClient().messages.create({
     model: "claude-haiku-4-5",
     max_tokens: 1024,
     messages: [{ role: "user", content: prompt }],
@@ -108,22 +130,31 @@ Svar i dette JSON-formatet:
     };
   };
 
+  const defaultParsed = {
+    summary: "Analyse fullført.",
+    homeStrengths: [] as string[],
+    awayStrengths: [] as string[],
+    keyFactors: [] as string[],
+    probabilities: { homeWin: 0.4, draw: 0.28, awayWin: 0.32, over25: 0.5 },
+  };
+
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    parsed = JSON.parse(jsonMatch?.[0] ?? "{}");
-  } catch {
+    const raw = JSON.parse(jsonMatch?.[0] ?? "{}");
     parsed = {
-      summary: text.slice(0, 200),
-      homeStrengths: [],
-      awayStrengths: [],
-      keyFactors: [],
-      probabilities: { homeWin: 0.4, draw: 0.28, awayWin: 0.32, over25: 0.5 },
+      summary: raw.summary ?? text.slice(0, 300),
+      homeStrengths: raw.homeStrengths ?? [],
+      awayStrengths: raw.awayStrengths ?? [],
+      keyFactors: raw.keyFactors ?? [],
+      probabilities: raw.probabilities ?? defaultParsed.probabilities,
     };
+  } catch {
+    parsed = { ...defaultParsed, summary: text.slice(0, 300) };
   }
 
   // Bygg betsforslag basert på value
   const bets: BetSuggestion[] = [];
-  const prob = parsed.probabilities;
+  const prob = parsed.probabilities ?? defaultParsed.probabilities;
 
   const candidates = [
     {
@@ -157,9 +188,11 @@ Svar i dette JSON-formatet:
   ];
 
   for (const c of candidates) {
-    if (!c.odds || c.odds <= 1) continue;
-    const edge = valueEdge(c.ourProb, c.odds);
-    if (edge < 0.03) continue; // Kun bets med >3% edge
+    const ourProb = Number(c.ourProb);
+    const bookOdds = Number(c.odds);
+    if (!bookOdds || bookOdds <= 1 || !ourProb || ourProb <= 0 || ourProb >= 1) continue;
+    const edge = valueEdge(ourProb, bookOdds);
+    if (!isFinite(edge) || isNaN(edge) || edge < 0.03) continue;
 
     const confidence: BetSuggestion["confidence"] =
       edge > 0.12 ? "HØY" : edge > 0.06 ? "MEDIUM" : "LAV";
@@ -167,12 +200,12 @@ Svar i dette JSON-formatet:
     bets.push({
       market: c.market,
       description: `${homeTeam} vs ${awayTeam} — ${c.market}`,
-      odds: c.odds,
+      odds: bookOdds,
       bookmaker: c.bookmaker,
-      ourProbability: c.ourProb,
-      impliedProbability: impliedProbability(c.odds),
+      ourProbability: ourProb,
+      impliedProbability: impliedProbability(bookOdds),
       valueEdgePct: Math.round(edge * 1000) / 10,
-      recommendedStake: kellyStake(bankroll, c.ourProb, c.odds),
+      recommendedStake: kellyStake(bankroll, ourProb, bookOdds),
       confidence,
     });
   }
