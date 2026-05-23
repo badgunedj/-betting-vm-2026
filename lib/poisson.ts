@@ -16,8 +16,21 @@ export interface PoissonPrediction {
   awayWin: number;
   over25: number;
   under25: number;
+  over15: number;
+  under15: number;
+  over35: number;
+  under35: number;
   bttsYes: number;  // P(hjemme ≥1) × P(borte ≥1) = (1−e^−λH)(1−e^−λA)
   bttsNo: number;
+  // Double Chance
+  dc1X: number;   // P(hjemme seier eller uavgjort)
+  dcX2: number;   // P(uavgjort eller borte seier)
+  dc12: number;   // P(hjemme seier eller borte seier) — ingen uavgjort
+  // Draw No Bet — normaliser bort uavgjort
+  dnbHome: number;
+  dnbAway: number;
+  // Correct Score — topp 10 scorelines sortert etter sannsynlighet
+  topScores: Array<{ score: string; prob: number }>;
   expectedHomeGoals: number;
   expectedAwayGoals: number;
 }
@@ -28,7 +41,9 @@ export function poissonPredict(
   expectedAwayGoals: number,
   maxGoals = 8
 ): PoissonPrediction {
-  let homeWin = 0, draw = 0, awayWin = 0, over25 = 0;
+  let homeWin = 0, draw = 0, awayWin = 0;
+  let over15 = 0, over25 = 0, over35 = 0;
+  const rawScores: Record<string, number> = {};
 
   for (let h = 0; h <= maxGoals; h++) {
     for (let a = 0; a <= maxGoals; a++) {
@@ -36,7 +51,14 @@ export function poissonPredict(
       if (h > a)      homeWin += p;
       else if (h < a) awayWin += p;
       else            draw    += p;
+      if (h + a > 1.5) over15 += p;
       if (h + a > 2.5) over25 += p;
+      if (h + a > 3.5) over35 += p;
+      // Correct Score: samle scorelines opp til 5-5 (tilstrekkelig for topp-10)
+      if (h <= 5 && a <= 5) {
+        const key = `${h}-${a}`;
+        rawScores[key] = (rawScores[key] ?? 0) + p;
+      }
     }
   }
 
@@ -49,14 +71,40 @@ export function poissonPredict(
   // BTTS: P(hjemme score≥1) × P(borte score≥1) — én linje Poisson-matte
   const bttsYes = (1 - Math.exp(-expectedHomeGoals)) * (1 - Math.exp(-expectedAwayGoals));
 
+  // Double Chance — summer direkte fra normaliserte sannsynligheter
+  const dc1X = homeWin + draw;
+  const dcX2 = draw + awayWin;
+  const dc12 = homeWin + awayWin;
+
+  // Draw No Bet — normaliser bort uavgjort
+  const decideTotal = homeWin + awayWin;
+  const dnbHome = decideTotal > 0 ? homeWin / decideTotal : 0.5;
+  const dnbAway = decideTotal > 0 ? awayWin / decideTotal : 0.5;
+
+  // Correct Score — topp 10 sortert etter sannsynlighet
+  const topScores = Object.entries(rawScores)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 10)
+    .map(([score, prob]) => ({ score, prob }));
+
   return {
     homeWin,
     draw,
     awayWin,
+    over15,
+    under15: 1 - over15,
     over25,
     under25: 1 - over25,
+    over35,
+    under35: 1 - over35,
     bttsYes,
     bttsNo: 1 - bttsYes,
+    dc1X,
+    dcX2,
+    dc12,
+    dnbHome,
+    dnbAway,
+    topScores,
     expectedHomeGoals,
     expectedAwayGoals,
   };

@@ -328,6 +328,46 @@ Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
       : []),
   ];
 
+  // ── Double Chance (ren Poisson) ──
+  if (poisson && odds.bestDc1X)
+    candidates.push({ market: "Double Chance 1X", ourProb: poisson.dc1X, odds: odds.bestDc1X.odds, bookmaker: odds.bestDc1X.bookmaker, isDraw: false });
+  if (poisson && odds.bestDcX2)
+    candidates.push({ market: "Double Chance X2", ourProb: poisson.dcX2, odds: odds.bestDcX2.odds, bookmaker: odds.bestDcX2.bookmaker, isDraw: false });
+  if (poisson && odds.bestDc12)
+    candidates.push({ market: "Double Chance 12", ourProb: poisson.dc12, odds: odds.bestDc12.odds, bookmaker: odds.bestDc12.bookmaker, isDraw: false });
+
+  // ── Draw No Bet (ren Poisson) ──
+  if (poisson && odds.bestDnbHome)
+    candidates.push({ market: "Draw No Bet Hjemme", ourProb: poisson.dnbHome, odds: odds.bestDnbHome.odds, bookmaker: odds.bestDnbHome.bookmaker, isDraw: false });
+  if (poisson && odds.bestDnbAway)
+    candidates.push({ market: "Draw No Bet Borte", ourProb: poisson.dnbAway, odds: odds.bestDnbAway.odds, bookmaker: odds.bestDnbAway.bookmaker, isDraw: false });
+
+  // ── Over/Under 1.5 og 3.5 (ren Poisson) ──
+  if (poisson && odds.bestOver15)
+    candidates.push({ market: "Over 1.5 mål",  ourProb: poisson.over15,  odds: odds.bestOver15.odds,  bookmaker: odds.bestOver15.bookmaker,  isDraw: false });
+  if (poisson && odds.bestUnder15)
+    candidates.push({ market: "Under 1.5 mål", ourProb: poisson.under15, odds: odds.bestUnder15.odds, bookmaker: odds.bestUnder15.bookmaker, isDraw: false });
+  if (poisson && odds.bestOver35)
+    candidates.push({ market: "Over 3.5 mål",  ourProb: poisson.over35,  odds: odds.bestOver35.odds,  bookmaker: odds.bestOver35.bookmaker,  isDraw: false });
+  if (poisson && odds.bestUnder35)
+    candidates.push({ market: "Under 3.5 mål", ourProb: poisson.under35, odds: odds.bestUnder35.odds, bookmaker: odds.bestUnder35.bookmaker, isDraw: false });
+
+  // ── Correct Score — kryssjekk Poisson-topp-10 mot bookmaker odds ──
+  if (poisson && odds.bestCorrectScore.length > 0) {
+    for (const { score, prob: scoreProb } of poisson.topScores.slice(0, 10)) {
+      const csEntry = odds.bestCorrectScore.find(cs => cs.score === score);
+      if (csEntry) {
+        candidates.push({
+          market: `Korrekt resultat ${score}`,
+          ourProb: scoreProb,
+          odds: csEntry.odds,
+          bookmaker: csEntry.bookmaker,
+          isDraw: false,
+        });
+      }
+    }
+  }
+
   // Asian Handicap — ren Poisson, ingen AI-justering (samme som BTTS)
   // Effektiv sannsynlighet: pWin + 0.5 × push (push = stake returnert)
   if (poisson && odds.ahLine !== null) {

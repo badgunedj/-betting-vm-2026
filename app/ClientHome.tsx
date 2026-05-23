@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import MatchCard from "@/components/MatchCard";
 import BankrollTracker from "@/components/BankrollTracker";
 import AnalysisHistory from "@/components/AnalysisHistory";
+import DagensTips from "@/components/DagensTips";
 import { MatchOdds } from "@/lib/odds-api";
 
 type Tab = "eliteserien" | "worldcup" | "historikk" | "logg";
@@ -46,6 +47,11 @@ export default function ClientHome({ startBankroll }: { startBankroll: number })
 
   return (
     <div className="space-y-5">
+      {/* Dagens tips — automatisk Poisson-scan av alle kommende kamper */}
+      {(tab === "eliteserien" || tab === "worldcup") && (
+        <DagensTips bankroll={startBankroll} sport={tab} />
+      )}
+
       {/* Tab-bar */}
       <div className="flex gap-2 bg-[#1a1d27] rounded-xl p-1 border border-[#2a2d3a]">
         {tabs.map((t) => (

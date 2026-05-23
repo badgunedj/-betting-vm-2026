@@ -110,8 +110,10 @@ export async function GET(req: NextRequest) {
       let ourAway: number | null = null;
       let ourOver25: number | null = null;
       let ourBttsYes: number | null = null;
-      let expHome: number | null = null;  // for AH beregning
+      let expHome: number | null = null;  // for AH og tilleggsmarkeder
       let expAway: number | null = null;
+      // Lagret pred-objekt fra Poisson (gjenbrukes for DC/DNB/O15/O35/CS — unngår dobbel beregning)
+      let poissonPred: ReturnType<typeof poissonPredict> | null = null;
 
       if (sport.isEliteserien) {
         // Poisson-modell fra 2026-sesongdata
@@ -129,12 +131,12 @@ export async function GET(req: NextRequest) {
             aStats.xgFor, aStats.xgAgainst,
           );
           if (eg) {
-            const pred = poissonPredict(eg.expectedHome, eg.expectedAway);
-            ourHome    = pred.homeWin;
-            ourDraw    = pred.draw;
-            ourAway    = pred.awayWin;
-            ourOver25  = pred.over25;
-            ourBttsYes = pred.bttsYes;
+            poissonPred = poissonPredict(eg.expectedHome, eg.expectedAway);
+            ourHome    = poissonPred.homeWin;
+            ourDraw    = poissonPred.draw;
+            ourAway    = poissonPred.awayWin;
+            ourOver25  = poissonPred.over25;
+            ourBttsYes = poissonPred.bttsYes;
             expHome    = eg.expectedHome;
             expAway    = eg.expectedAway;
             if (eg.usedXG) console.log(`[xG] ${match.homeTeam} vs ${match.awayTeam}: using xG`);
@@ -167,6 +169,35 @@ export async function GET(req: NextRequest) {
           ? [{ market: "BTTS Ja",        ourProb: ourBttsYes, odds: match.bestBttsYes.odds, bookmaker: match.bestBttsYes.bookmaker }]
           : []),
       ];
+
+      // ── Poisson-baserte tilleggsmarkeder (bare Eliteserien) ──────────────────
+      // Gjenbruker poissonPred fra beregningen ovenfor — ingen dobbel matrise-kjøring
+      if (sport.isEliteserien && poissonPred !== null) {
+        const pred = poissonPred;
+
+        // Over/Under 1.5 og 3.5
+        if (match.bestOver15)  candidates.push({ market: "Over 1.5 mål",  ourProb: pred.over15,  odds: match.bestOver15.odds,  bookmaker: match.bestOver15.bookmaker });
+        if (match.bestUnder15) candidates.push({ market: "Under 1.5 mål", ourProb: pred.under15, odds: match.bestUnder15.odds, bookmaker: match.bestUnder15.bookmaker });
+        if (match.bestOver35)  candidates.push({ market: "Over 3.5 mål",  ourProb: pred.over35,  odds: match.bestOver35.odds,  bookmaker: match.bestOver35.bookmaker });
+        if (match.bestUnder35) candidates.push({ market: "Under 3.5 mål", ourProb: pred.under35, odds: match.bestUnder35.odds, bookmaker: match.bestUnder35.bookmaker });
+
+        // Double Chance
+        if (match.bestDc1X)   candidates.push({ market: "Double Chance 1X", ourProb: pred.dc1X, odds: match.bestDc1X.odds, bookmaker: match.bestDc1X.bookmaker });
+        if (match.bestDcX2)   candidates.push({ market: "Double Chance X2", ourProb: pred.dcX2, odds: match.bestDcX2.odds, bookmaker: match.bestDcX2.bookmaker });
+        if (match.bestDc12)   candidates.push({ market: "Double Chance 12", ourProb: pred.dc12, odds: match.bestDc12.odds, bookmaker: match.bestDc12.bookmaker });
+
+        // Draw No Bet
+        if (match.bestDnbHome) candidates.push({ market: "Draw No Bet Hjemme", ourProb: pred.dnbHome, odds: match.bestDnbHome.odds, bookmaker: match.bestDnbHome.bookmaker });
+        if (match.bestDnbAway) candidates.push({ market: "Draw No Bet Borte",  ourProb: pred.dnbAway, odds: match.bestDnbAway.odds, bookmaker: match.bestDnbAway.bookmaker });
+
+        // Correct Score
+        if (match.bestCorrectScore.length > 0) {
+          for (const { score, prob } of pred.topScores.slice(0, 10)) {
+            const csEntry = match.bestCorrectScore.find(cs => cs.score === score);
+            if (csEntry) candidates.push({ market: `Korrekt resultat ${score}`, ourProb: prob, odds: csEntry.odds, bookmaker: csEntry.bookmaker });
+          }
+        }
+      }
 
       // Asian Handicap — Poisson score-matrise gir presise AH-probs
       if (expHome !== null && expAway !== null && match.ahLine !== null) {

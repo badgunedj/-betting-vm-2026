@@ -47,6 +47,22 @@ export interface MatchOdds {
   ahLine:      number | null;
   bestAhHome:  { odds: number; bookmaker: string } | null;
   bestAhAway:  { odds: number; bookmaker: string } | null;
+  // ── Nye markeder ──
+  /** Double Chance */
+  bestDc1X:    { odds: number; bookmaker: string } | null;
+  bestDcX2:    { odds: number; bookmaker: string } | null;
+  bestDc12:    { odds: number; bookmaker: string } | null;
+  /** Draw No Bet */
+  bestDnbHome: { odds: number; bookmaker: string } | null;
+  bestDnbAway: { odds: number; bookmaker: string } | null;
+  /** Over/Under 1.5 */
+  bestOver15:  { odds: number; bookmaker: string } | null;
+  bestUnder15: { odds: number; bookmaker: string } | null;
+  /** Over/Under 3.5 */
+  bestOver35:  { odds: number; bookmaker: string } | null;
+  bestUnder35: { odds: number; bookmaker: string } | null;
+  /** Correct Score — beste odds per scoreline, sortert etter sannsynlighet */
+  bestCorrectScore: Array<{ score: string; odds: number; bookmaker: string }>;
 }
 
 // Bookmakers tilgjengelig for norske spillere (oppdatert mai 2026)
@@ -95,8 +111,8 @@ export function kellyStake(
 export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
   const bookmakerList = BOOKMAKERS.join(",");
 
-  // Hent 1X2 + totals + BTTS + Asian Handicap parallelt
-  const [h2hRes, totalsRes, bttsRes, ahRes] = await Promise.all([
+  // Hent 1X2 + totals + BTTS + AH + DC + DNB + alternate_totals + correct_score parallelt
+  const [h2hRes, totalsRes, bttsRes, ahRes, dcRes, dnbRes, altTotalsRes, csRes] = await Promise.all([
     fetch(
       `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=h2h&bookmakers=${bookmakerList}&oddsFormat=decimal`,
       { next: { revalidate: 900 } } // cache 15 min
@@ -112,14 +128,34 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
     fetch(
       `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=asian_handicap&bookmakers=${bookmakerList}&oddsFormat=decimal`,
       { next: { revalidate: 900 } }
-    ).catch(() => null), // AH er ikke tilgjengelig for alle sports/bookmakers
+    ).catch(() => null),
+    fetch(
+      `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=double_chance&bookmakers=${bookmakerList}&oddsFormat=decimal`,
+      { next: { revalidate: 900 } }
+    ).catch(() => null),
+    fetch(
+      `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=draw_no_bet&bookmakers=${bookmakerList}&oddsFormat=decimal`,
+      { next: { revalidate: 900 } }
+    ).catch(() => null),
+    fetch(
+      `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=alternate_totals&bookmakers=${bookmakerList}&oddsFormat=decimal`,
+      { next: { revalidate: 900 } }
+    ).catch(() => null),
+    fetch(
+      `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=correct_score&bookmakers=${bookmakerList}&oddsFormat=decimal`,
+      { next: { revalidate: 900 } }
+    ).catch(() => null),
   ]);
 
-  const [h2hData, totalsData, bttsData, ahData] = await Promise.all([
+  const [h2hData, totalsData, bttsData, ahData, dcData, dnbData, altTotalsData, csData] = await Promise.all([
     h2hRes.json(),
     totalsRes.json(),
     bttsRes.json(),
     ahRes ? ahRes.json().catch(() => null) : Promise.resolve(null),
+    dcRes  ? dcRes.json().catch(() => null)  : Promise.resolve(null),
+    dnbRes ? dnbRes.json().catch(() => null) : Promise.resolve(null),
+    altTotalsRes ? altTotalsRes.json().catch(() => null) : Promise.resolve(null),
+    csRes  ? csRes.json().catch(() => null)  : Promise.resolve(null),
   ]);
 
   // Rå AH-data: event.id → liste over {line, homeOdds, awayOdds, bookmaker}
@@ -144,6 +180,98 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
         });
       }
       if (entries.length > 0) ahRaw.set(event.id, entries);
+    }
+  }
+
+  // ── Double Chance maps ──────────────────────────────────────────────────────
+  // API-outcome navnene: "1X" | "12" | "X2"
+  const dc1XMap = new Map<string, { odds: number; bookmaker: string }>();
+  const dcX2Map = new Map<string, { odds: number; bookmaker: string }>();
+  const dc12Map = new Map<string, { odds: number; bookmaker: string }>();
+  if (Array.isArray(dcData)) {
+    for (const event of dcData) {
+      for (const bk of event.bookmakers ?? []) {
+        if (bk.key === "pinnacle") continue;
+        const mkt = bk.markets?.find((m: { key: string }) => m.key === "double_chance");
+        if (!mkt) continue;
+        const o1X = mkt.outcomes?.find((o: { name: string }) => o.name === "1X")?.price;
+        const oX2 = mkt.outcomes?.find((o: { name: string }) => o.name === "X2")?.price;
+        const o12 = mkt.outcomes?.find((o: { name: string }) => o.name === "12")?.price;
+        if (o1X) { const cur = dc1XMap.get(event.id); if (!cur || o1X > cur.odds) dc1XMap.set(event.id, { odds: o1X, bookmaker: bk.key }); }
+        if (oX2) { const cur = dcX2Map.get(event.id); if (!cur || oX2 > cur.odds) dcX2Map.set(event.id, { odds: oX2, bookmaker: bk.key }); }
+        if (o12) { const cur = dc12Map.get(event.id); if (!cur || o12 > cur.odds) dc12Map.set(event.id, { odds: o12, bookmaker: bk.key }); }
+      }
+    }
+  }
+
+  // ── Draw No Bet maps ─────────────────────────────────────────────────────────
+  // API: outcomes navngitt etter lagene (samme som h2h men uten uavgjort)
+  const dnbHomeMap = new Map<string, { odds: number; bookmaker: string }>();
+  const dnbAwayMap = new Map<string, { odds: number; bookmaker: string }>();
+  if (Array.isArray(dnbData)) {
+    for (const event of dnbData) {
+      for (const bk of event.bookmakers ?? []) {
+        if (bk.key === "pinnacle") continue;
+        const mkt = bk.markets?.find((m: { key: string }) => m.key === "draw_no_bet");
+        if (!mkt) continue;
+        const oHome = mkt.outcomes?.find((o: { name: string }) => o.name === event.home_team)?.price;
+        const oAway = mkt.outcomes?.find((o: { name: string }) => o.name === event.away_team)?.price;
+        if (oHome) { const cur = dnbHomeMap.get(event.id); if (!cur || oHome > cur.odds) dnbHomeMap.set(event.id, { odds: oHome, bookmaker: bk.key }); }
+        if (oAway) { const cur = dnbAwayMap.get(event.id); if (!cur || oAway > cur.odds) dnbAwayMap.set(event.id, { odds: oAway, bookmaker: bk.key }); }
+      }
+    }
+  }
+
+  // ── Alternate Totals maps (Over/Under 1.5 og 3.5) ───────────────────────────
+  // API: outcomes med "Over"/"Under" + point (1.5, 2.5, 3.5, ...)
+  const over15Map  = new Map<string, { odds: number; bookmaker: string }>();
+  const under15Map = new Map<string, { odds: number; bookmaker: string }>();
+  const over35Map  = new Map<string, { odds: number; bookmaker: string }>();
+  const under35Map = new Map<string, { odds: number; bookmaker: string }>();
+  if (Array.isArray(altTotalsData)) {
+    for (const event of altTotalsData) {
+      for (const bk of event.bookmakers ?? []) {
+        if (bk.key === "pinnacle") continue;
+        const mkt = bk.markets?.find((m: { key: string }) => m.key === "alternate_totals");
+        if (!mkt) continue;
+        for (const outcome of mkt.outcomes ?? []) {
+          const pt: number = outcome.point;
+          const price: number = outcome.price;
+          const name: string = outcome.name;
+          if (!pt || !price) continue;
+          if (Math.abs(pt - 1.5) < 0.01) {
+            if (name === "Over")  { const cur = over15Map.get(event.id);  if (!cur || price > cur.odds) over15Map.set(event.id,  { odds: price, bookmaker: bk.key }); }
+            if (name === "Under") { const cur = under15Map.get(event.id); if (!cur || price > cur.odds) under15Map.set(event.id, { odds: price, bookmaker: bk.key }); }
+          }
+          if (Math.abs(pt - 3.5) < 0.01) {
+            if (name === "Over")  { const cur = over35Map.get(event.id);  if (!cur || price > cur.odds) over35Map.set(event.id,  { odds: price, bookmaker: bk.key }); }
+            if (name === "Under") { const cur = under35Map.get(event.id); if (!cur || price > cur.odds) under35Map.set(event.id, { odds: price, bookmaker: bk.key }); }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Correct Score map ────────────────────────────────────────────────────────
+  // API: outcomes navngitt "0-0", "1-0", "2-1" osv.
+  // Lagrer beste odds per scoreline per kamp: Map<eventId, Map<score, {odds,bk}>>
+  const csMap = new Map<string, Map<string, { odds: number; bookmaker: string }>>();
+  if (Array.isArray(csData)) {
+    for (const event of csData) {
+      for (const bk of event.bookmakers ?? []) {
+        if (bk.key === "pinnacle") continue;
+        const mkt = bk.markets?.find((m: { key: string }) => m.key === "correct_score");
+        if (!mkt) continue;
+        if (!csMap.has(event.id)) csMap.set(event.id, new Map());
+        const scoreMap = csMap.get(event.id)!;
+        for (const outcome of mkt.outcomes ?? []) {
+          const score: string = outcome.name;
+          const price: number = outcome.price;
+          if (!score || !price) continue;
+          const cur = scoreMap.get(score);
+          if (!cur || price > cur.odds) scoreMap.set(score, { odds: price, bookmaker: bk.key });
+        }
+      }
     }
   }
 
@@ -299,6 +427,12 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       }
     }
 
+    // Correct Score: konverter scoreMap til sortert array (sorteres i UI/analyze basert på Poisson-prob)
+    const eventScoreMap = csMap.get(event.id);
+    const bestCorrectScore: Array<{ score: string; odds: number; bookmaker: string }> = eventScoreMap
+      ? [...eventScoreMap.entries()].map(([score, { odds, bookmaker }]) => ({ score, odds, bookmaker }))
+      : [];
+
     return {
       matchId: event.id,
       homeTeam: event.home_team,
@@ -316,6 +450,16 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       ahLine,
       bestAhHome,
       bestAhAway,
+      bestDc1X:    dc1XMap.get(event.id)  ?? null,
+      bestDcX2:    dcX2Map.get(event.id)  ?? null,
+      bestDc12:    dc12Map.get(event.id)  ?? null,
+      bestDnbHome: dnbHomeMap.get(event.id) ?? null,
+      bestDnbAway: dnbAwayMap.get(event.id) ?? null,
+      bestOver15:  over15Map.get(event.id)  ?? null,
+      bestUnder15: under15Map.get(event.id) ?? null,
+      bestOver35:  over35Map.get(event.id)  ?? null,
+      bestUnder35: under35Map.get(event.id) ?? null,
+      bestCorrectScore,
     };
   });
 }

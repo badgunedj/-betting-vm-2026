@@ -26,13 +26,29 @@ interface Props {
   preloadedOdds?: MatchOdds | null;
 }
 
+// BoaBet URL-struktur (fra devtools):
+//   Kamp-side:  /event-details?champ=5106&country=1388&event=EVENT_ID&live=0&sport=1&supertip=0
+//   Liga-side:  /pre-match?champ=5106&country=1388&sport=1&live=0
+const BOABET_EVENT_BASE  = "https://play.1-boabet-eu.com/en/sports/sportsbook/event-details";
+const BOABET_LEAGUE_BASE = "https://play.1-boabet-eu.com/en/sports/sportsbook/pre-match";
+// champ=5106 = Eliteserien 2026 · country=1388 = Norge · sport=1 = fotball
+function boaBetUrl(sport: string, eventId?: number | null): string {
+  if (sport === "eliteserien" || sport === "soccer_norway_eliteserien") {
+    if (eventId) {
+      return `${BOABET_EVENT_BASE}?champ=5106&country=1388&event=${eventId}&live=0&sport=1&supertip=0`;
+    }
+    return `${BOABET_LEAGUE_BASE}?champ=5106&country=1388&sport=1&live=0`;
+  }
+  // VM 2026 — liga-siden uten deep-link (champ/country-IDer ikke verifisert)
+  return `${BOABET_LEAGUE_BASE}`;
+}
+
 const BOOKMAKER_LINKS: Record<string, string> = {
   nordicbet: "https://www.nordicbet.com",
   betsson:   "https://www.betsson.com/nb",
   betway:    "https://www.betway.com",
   pinnacle:  "https://www.pinnacle.com",
-  // Anbefalte norske alternativer (ikke i odds-API men gode for å plassere bet)
-  boabet:    "https://www.boabet.com",
+  boabet:    BOABET_LEAGUE_BASE,
 };
 
 const BOOKMAKER_NAMES: Record<string, string> = {
@@ -612,15 +628,31 @@ export default function MatchCard({
                     })()}
 
                     <div className="flex gap-2">
+                      {/* Primærknapp: BoaBet med liga-deep-link */}
                       <a
-                        href={BOOKMAKER_LINKS[bet.bookmaker] ?? "#"}
+                        href={boaBetUrl(sport)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex-1 text-center py-2 rounded-lg bg-green-700 hover:bg-green-600
+                        className="flex-1 text-center py-2 rounded-lg bg-amber-600 hover:bg-amber-500
                           text-white text-sm font-semibold transition-colors"
+                        title={`Ref-odds: ${bet.odds.toFixed(2)} hos ${BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker}`}
                       >
-                        Bet på {BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker} →
+                        🦁 Bet på BoaBet →
                       </a>
+                      {/* Sekundær: direkte lenke til den anbefalte bookmaker (kun info) */}
+                      {bet.bookmaker !== "boabet" && (
+                        <a
+                          href={BOOKMAKER_LINKS[bet.bookmaker] ?? "#"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 rounded-lg border border-[#2a2d3a] text-[#64748b]
+                            hover:text-white hover:border-[#3a4060] text-xs font-semibold
+                            transition-colors whitespace-nowrap"
+                          title={`Sjekk ref-odds ${bet.odds.toFixed(2)} hos ${BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker}`}
+                        >
+                          {BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker} ↗
+                        </a>
+                      )}
                       {loggedBetIds.has(`${matchKey}_${bet.market}`) ? (
                         <div className="px-3 py-2 rounded-lg bg-green-950 border border-green-800
                           text-green-400 text-sm font-semibold whitespace-nowrap"
