@@ -1,0 +1,32 @@
+name: 🎯 Value Bet Scanner
+
+on:
+  schedule:
+    # Kjører hvert 30. minutt (fungerer gratis med GitHub Actions)
+    - cron: '*/30 * * * *'
+  workflow_dispatch:   # Manuell kjøring fra GitHub-UI
+
+jobs:
+  scan:
+    name: Scan for value bets
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Ping scanner endpoint
+        run: |
+          HTTP_STATUS=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ vars.APP_URL }}/api/cron/scan")
+
+          BODY=$(cat /tmp/response.txt)
+          echo "Status: $HTTP_STATUS"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "❌ Scanner feilet med status $HTTP_STATUS"
+            exit 1
+          fi
+
+          echo "✅ Scanner kjørt OK"
