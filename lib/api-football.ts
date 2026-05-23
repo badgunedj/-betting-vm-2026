@@ -94,6 +94,38 @@ export async function getTeamForm(
   };
 }
 
+// Hent skaderapport for et lag på en bestemt dato
+export interface InjuryReport {
+  playerName: string;
+  type: string; // "Missing Fixture" | "Questionable" | "Day To Day"
+  reason: string; // "Knee", "Hamstring" etc.
+}
+
+export async function getTeamInjuries(
+  teamId: number,
+  leagueId: number,
+  season: number,
+  date: string // "YYYY-MM-DD"
+): Promise<InjuryReport[]> {
+  if (!teamId || !leagueId) return [];
+  try {
+    const res = await fetch(
+      `${BASE_URL}/injuries?team=${teamId}&league=${leagueId}&season=${season}&date=${date}`,
+      { headers, next: { revalidate: 3600 } }
+    );
+    const data = await res.json();
+    return (data?.response ?? []).slice(0, 5).map((r: {
+      player: { name: string; type: string; reason: string };
+    }) => ({
+      playerName: r.player?.name ?? "Ukjent",
+      type: r.player?.type ?? "Ukjent",
+      reason: r.player?.reason ?? "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
 // Hent H2H historikk
 export async function getH2H(
   team1: number,

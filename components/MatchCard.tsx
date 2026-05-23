@@ -75,7 +75,9 @@ export default function MatchCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           homeTeam, awayTeam, bankroll,
-          odds: preloadedOdds, // send odds direkte — ingen re-fetch
+          odds: preloadedOdds,
+          commenceTime: date,   // for værvarsling
+          sport,                // for å velge riktige datakilder
         }),
       });
       const data = await res.json();
