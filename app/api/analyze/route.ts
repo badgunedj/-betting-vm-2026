@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTeamForm, getH2H } from "@/lib/api-football";
+import { getH2H } from "@/lib/api-football";
 import { MatchOdds } from "@/lib/odds-api";
 import { analyzeMatch } from "@/lib/analyze";
 import { findTeamInfo } from "@/lib/team-map";
@@ -7,6 +7,7 @@ import { getClubElos } from "@/lib/club-elo";
 import { getMatchWeather } from "@/lib/weather";
 import { expectedGoalsFromForm, poissonPredict } from "@/lib/poisson";
 import { getNationalEloResult } from "@/lib/national-elo";
+import { getTeamStats2026 } from "@/lib/eliteserien-stats";
 
 // Vercel Hobby plan: 10 sek maks — gi hvert kall 3 sek timeout
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -44,15 +45,25 @@ export async function POST(req: NextRequest) {
       ? getNationalEloResult(homeTeam, awayTeam)
       : null;
 
-    // Hent datakilder parallelt med timeout — alle feiler gracefully
-    const [homeForm, awayForm, h2h, clubElo, weather] = await Promise.all([
-      homeInfo && isEliteserien
-        ? withTimeout(getTeamForm(homeInfo.apiFootballId, homeInfo.leagueId), TIMEOUT, null)
-        : Promise.resolve(null),
+    // Hent Eliteserien 2026-statistikk direkte (hardkodet + live CSV)
+    const [homeStats2026, awayStats2026] = isEliteserien
+      ? await Promise.all([
+          getTeamStats2026(homeTeam).catch(() => null),
+          getTeamStats2026(awayTeam).catch(() => null),
+        ])
+      : [null, null];
 
-      awayInfo && isEliteserien
-        ? withTimeout(getTeamForm(awayInfo.apiFootballId, awayInfo.leagueId), TIMEOUT, null)
-        : Promise.resolve(null),
+    // Konverter til TeamForm-format for kompatibilitet
+    const toTeamForm = (s: typeof homeStats2026, id: number) =>
+      s ? { teamId: id, teamName: s.teamName, played: s.played, wins: s.wins, draws: s.draws, losses: s.losses, goalsFor: s.goalsFor, goalsAgainst: s.goalsAgainst, form: s.form } : null;
+
+    const homeFormFromStats = toTeamForm(homeStats2026, homeInfo?.apiFootballId ?? 0);
+    const awayFormFromStats = toTeamForm(awayStats2026, awayInfo?.apiFootballId ?? 0);
+
+    // Hent datakilder parallelt med timeout — alle feiler gracefully
+    const [, , h2h, clubElo, weather] = await Promise.all([
+      Promise.resolve(null), // form: bruker 2026-stats istedet
+      Promise.resolve(null),
 
       homeInfo && awayInfo && isEliteserien
         ? withTimeout(
@@ -78,9 +89,13 @@ export async function POST(req: NextRequest) {
     // Kombiner ELO-kilder: nasjonal-ELO for VM, club ELO for Eliteserien
     const elo = nationalElo ?? clubElo;
 
-    // Poisson-modell fra sesongstatistikk
+    // Bruk 2026-stats som primær form-kilde for Eliteserien
+    const homeForm = homeFormFromStats;
+    const awayForm = awayFormFromStats;
+
+    // Poisson-modell fra 2026-sesongstatistikk
     let poissonPred = null;
-    if (homeForm && awayForm) {
+    if (homeForm && awayForm && homeForm.played >= 3 && awayForm.played >= 3) {
       const eg = expectedGoalsFromForm(
         homeForm.goalsFor, homeForm.goalsAgainst, homeForm.played,
         awayForm.goalsFor, awayForm.goalsAgainst, awayForm.played
