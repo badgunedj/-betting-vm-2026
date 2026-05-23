@@ -42,6 +42,11 @@ export interface MatchOdds {
   bestBttsYes:  { odds: number; bookmaker: string } | null;
   bestBttsNo:   { odds: number; bookmaker: string } | null;
   pinnacleRef: PinnacleRef | null;   // null hvis Pinnacle ikke har odds for kampen
+  /** Asian Handicap — beste linje fra bettable bookmakers.
+   *  ahLine er fra hjemmelagets perspektiv (f.eks. -0.5 = hjemme gir 0.5 mål) */
+  ahLine:      number | null;
+  bestAhHome:  { odds: number; bookmaker: string } | null;
+  bestAhAway:  { odds: number; bookmaker: string } | null;
 }
 
 // Bookmakers tilgjengelig for norske spillere (oppdatert mai 2026)
@@ -89,8 +94,8 @@ export function kellyStake(
 export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
   const bookmakerList = BOOKMAKERS.join(",");
 
-  // Hent 1X2 + totals + BTTS parallelt
-  const [h2hRes, totalsRes, bttsRes] = await Promise.all([
+  // Hent 1X2 + totals + BTTS + Asian Handicap parallelt
+  const [h2hRes, totalsRes, bttsRes, ahRes] = await Promise.all([
     fetch(
       `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=h2h&bookmakers=${bookmakerList}&oddsFormat=decimal`,
       { next: { revalidate: 900 } } // cache 15 min
@@ -103,13 +108,43 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=btts&bookmakers=${bookmakerList}&oddsFormat=decimal`,
       { next: { revalidate: 900 } }
     ),
+    fetch(
+      `${BASE_URL}/sports/${sport}/odds?apiKey=${KEY}&regions=eu&markets=asian_handicap&bookmakers=${bookmakerList}&oddsFormat=decimal`,
+      { next: { revalidate: 900 } }
+    ).catch(() => null), // AH er ikke tilgjengelig for alle sports/bookmakers
   ]);
 
-  const [h2hData, totalsData, bttsData] = await Promise.all([
+  const [h2hData, totalsData, bttsData, ahData] = await Promise.all([
     h2hRes.json(),
     totalsRes.json(),
     bttsRes.json(),
+    ahRes ? ahRes.json().catch(() => null) : Promise.resolve(null),
   ]);
+
+  // Rå AH-data: event.id → liste over {line, homeOdds, awayOdds, bookmaker}
+  // Linje-valget gjøres per-event etter at vi kjenner bettable bookmakers
+  type AHEntry = { line: number; homeOdds: number; awayOdds: number; bookmaker: string };
+  const ahRaw = new Map<string, AHEntry[]>();
+  if (Array.isArray(ahData)) {
+    for (const event of ahData) {
+      const entries: AHEntry[] = [];
+      for (const bk of event.bookmakers ?? []) {
+        if (bk.key === "pinnacle") continue; // alltid ekskluder Pinnacle fra AH bet-mål
+        const mkt = bk.markets?.find((m: { key: string }) => m.key === "asian_handicap");
+        if (!mkt) continue;
+        const homeOut = mkt.outcomes?.find((o: { name: string; point?: number; price?: number }) => o.name === event.home_team);
+        const awayOut = mkt.outcomes?.find((o: { name: string; point?: number; price?: number }) => o.name === event.away_team);
+        if (!homeOut || !awayOut || homeOut.point === undefined) continue;
+        entries.push({
+          line: homeOut.point,          // hjemmelagets handicap (negativ = favoritt)
+          homeOdds: homeOut.price,
+          awayOdds: awayOut.price,
+          bookmaker: bk.key,
+        });
+      }
+      if (entries.length > 0) ahRaw.set(event.id, entries);
+    }
+  }
 
   if (!Array.isArray(h2hData)) return [];
 
@@ -201,6 +236,28 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
         { odds: 0, bookmaker: "" }
       );
 
+    // ── Asian Handicap: beste linje blant bettable bookmakers ──
+    const bettableKeys = new Set(bettable.map(b => b.bookmaker));
+    const eventAH = (ahRaw.get(event.id) ?? []).filter(d => bettableKeys.has(d.bookmaker));
+    let ahLine: number | null = null;
+    let bestAhHome: { odds: number; bookmaker: string } | null = null;
+    let bestAhAway: { odds: number; bookmaker: string } | null = null;
+
+    if (eventAH.length > 0) {
+      // Finn vanligste linje (mest likvid)
+      const lineFreq = new Map<number, number>();
+      for (const d of eventAH) lineFreq.set(d.line, (lineFreq.get(d.line) ?? 0) + 1);
+      ahLine = [...lineFreq.entries()].sort((a, b) => b[1] - a[1])[0][0];
+
+      // Beste home- og away-odds ved den valgte linjen
+      for (const d of eventAH.filter(d => d.line === ahLine)) {
+        if (!bestAhHome || d.homeOdds > bestAhHome.odds)
+          bestAhHome = { odds: d.homeOdds, bookmaker: d.bookmaker };
+        if (!bestAhAway || d.awayOdds > bestAhAway.odds)
+          bestAhAway = { odds: d.awayOdds, bookmaker: d.bookmaker };
+      }
+    }
+
     // Finn beste under25-odds på tvers av bookmakers
     let bestUnder: { odds: number; bookmaker: string } | null = null;
     for (const bk of bookmakers) {
@@ -253,6 +310,9 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       bestBttsYes:  bttsYesMap.get(event.id) ?? null,
       bestBttsNo:   bttsNoMap.get(event.id)  ?? null,
       pinnacleRef,
+      ahLine,
+      bestAhHome,
+      bestAhAway,
     };
   });
 }

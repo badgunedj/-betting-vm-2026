@@ -62,6 +62,32 @@ export function poissonPredict(
   };
 }
 
+/**
+ * Asian Handicap sannsynligheter fra Poisson-scorefordeling.
+ * @param line - Handikap fra hjemmelagets perspektiv (f.eks. -0.5, 0, -1.0)
+ * @returns { homeWin, awayWin, push } — summer til 1
+ *
+ * Bruk: effektiv sannsynlighet for Kelly/EV = pWin + 0.5 × push
+ * (push = innsats returnert = halvt-tap for bettor)
+ */
+export function poissonAH(
+  expectedHomeGoals: number,
+  expectedAwayGoals: number,
+  line: number,         // fra hjemmelag (negativ = hjemme favoritt, f.eks. -0.5)
+  maxGoals = 8,
+): { homeWin: number; awayWin: number; push: number } {
+  let homeWin = 0, push = 0;
+  for (let h = 0; h <= maxGoals; h++) {
+    for (let a = 0; a <= maxGoals; a++) {
+      const p = poissonPMF(expectedHomeGoals, h) * poissonPMF(expectedAwayGoals, a);
+      const diff = h + line - a; // positiv = hjemme AH vinner
+      if (diff > 0.001)        homeWin += p;
+      else if (diff > -0.001)  push    += p; // ≈ 0 = push (kun mulig ved heltallslinjer)
+    }
+  }
+  return { homeWin, push, awayWin: 1 - homeWin - push };
+}
+
 // Eliteserien 2026: faktisk ~1.48 mål per lag per kamp (beregnet fra sesongdata 23. mai 2026)
 // NB: var 1.38 (2024/2025) — 2026-sesongen har høyere scoring
 const ELITESERIEN_AVG_GOALS = 1.48;

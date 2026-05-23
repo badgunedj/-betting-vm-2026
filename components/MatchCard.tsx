@@ -370,6 +370,34 @@ export default function MatchCard({
             </div>
           )}
 
+          {/* Asian Handicap — kompakt info under odds-tabellen */}
+          {odds.ahLine !== null && (odds.bestAhHome || odds.bestAhAway) && (
+            <div className="mt-3 p-3 rounded-lg bg-[#0f1a1f] border border-[#1e3a4a]">
+              <p className="text-xs text-cyan-400 font-semibold mb-1">
+                ⚖️ Asian Handicap — linje {odds.ahLine > 0 ? "+" : ""}{odds.ahLine} (hjemme)
+              </p>
+              <div className="flex gap-4 text-xs font-mono">
+                {odds.bestAhHome && (
+                  <span className="text-white">
+                    Hjemme{" "}
+                    <span className="text-cyan-300 font-bold">{odds.bestAhHome.odds.toFixed(2)}</span>
+                    <span className="text-[#64748b] ml-1">({BOOKMAKER_NAMES[odds.bestAhHome.bookmaker] ?? odds.bestAhHome.bookmaker})</span>
+                  </span>
+                )}
+                {odds.bestAhAway && (
+                  <span className="text-white">
+                    Borte{" "}
+                    <span className="text-cyan-300 font-bold">{odds.bestAhAway.odds.toFixed(2)}</span>
+                    <span className="text-[#64748b] ml-1">({BOOKMAKER_NAMES[odds.bestAhAway.bookmaker] ?? odds.bestAhAway.bookmaker})</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-[#64748b] mt-1">
+                Ingen uavgjort-risiko · Edge beregnes mot Poisson score-matrise
+              </p>
+            </div>
+          )}
+
           <p className="text-xs text-green-400 mt-2">↑ Grønt = beste odds du kan bette på</p>
           <p className="text-xs text-[#64748b] mt-1">
             Margin: <span className="text-green-400">grønn ≤6%</span> · <span className="text-yellow-400">gul 6–8%</span> · <span className="text-red-400">rød &gt;8% ⛔ ignoreres som bet-mål</span>

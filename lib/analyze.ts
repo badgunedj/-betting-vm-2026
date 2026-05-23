@@ -3,7 +3,7 @@ import { TeamForm, H2HRecord } from "./api-football";
 import { MatchOdds, impliedProbability, kellyStake, valueEdge, MAX_BOOKMAKER_MARGIN } from "./odds-api";
 import { ClubEloResult } from "./club-elo";
 import { MatchWeather } from "./weather";
-import { PoissonPrediction } from "./poisson";
+import { PoissonPrediction, poissonAH } from "./poisson";
 
 function getClient() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_KEY });
@@ -300,6 +300,31 @@ Svar KUN i dette JSON-formatet (ingen tekst utenfor JSON):
       ? [{ market: "BTTS Nei", ourProb: poisson.bttsNo,  odds: odds.bestBttsNo.odds,  bookmaker: odds.bestBttsNo.bookmaker,  isDraw: false }]
       : []),
   ];
+
+  // Asian Handicap — ren Poisson, ingen AI-justering (samme som BTTS)
+  // Effektiv sannsynlighet: pWin + 0.5 × push (push = stake returnert)
+  if (poisson && odds.ahLine !== null) {
+    const ahResult = poissonAH(poisson.expectedHomeGoals, poisson.expectedAwayGoals, odds.ahLine);
+    const lineStr = (l: number) => `${l > 0 ? "+" : ""}${l}`;
+    if (odds.bestAhHome && ahResult.homeWin + 0.5 * ahResult.push > 0) {
+      candidates.push({
+        market: `AH Hjemme (${lineStr(odds.ahLine)})`,
+        ourProb: ahResult.homeWin + 0.5 * ahResult.push,
+        odds: odds.bestAhHome.odds,
+        bookmaker: odds.bestAhHome.bookmaker,
+        isDraw: false,
+      });
+    }
+    if (odds.bestAhAway && ahResult.awayWin + 0.5 * ahResult.push > 0) {
+      candidates.push({
+        market: `AH Borte (${lineStr(-odds.ahLine)})`,
+        ourProb: ahResult.awayWin + 0.5 * ahResult.push,
+        odds: odds.bestAhAway.odds,
+        bookmaker: odds.bestAhAway.bookmaker,
+        isDraw: false,
+      });
+    }
+  }
 
   const bets: BetSuggestion[] = [];
   for (const c of candidates) {

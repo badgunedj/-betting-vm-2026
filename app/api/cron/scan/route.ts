@@ -3,6 +3,7 @@ import { getMatchOdds, impliedProbability, kellyStake, valueEdge, MAX_BOOKMAKER_
 import { getTeamStats2026 } from "@/lib/eliteserien-stats";
 import { expectedGoalsFromForm, poissonPredict } from "@/lib/poisson";
 import { getNationalEloResult } from "@/lib/national-elo";
+import { poissonAH } from "@/lib/poisson";
 import { sendTelegramMessage, buildAlertMessage, TelegramAlert } from "@/lib/telegram";
 
 // ── Konfig ──────────────────────────────────────────────────────────────────
@@ -109,6 +110,8 @@ export async function GET(req: NextRequest) {
       let ourAway: number | null = null;
       let ourOver25: number | null = null;
       let ourBttsYes: number | null = null;
+      let expHome: number | null = null;  // for AH beregning
+      let expAway: number | null = null;
 
       if (sport.isEliteserien) {
         // Poisson-modell fra 2026-sesongdata
@@ -129,6 +132,8 @@ export async function GET(req: NextRequest) {
             ourAway    = pred.awayWin;
             ourOver25  = pred.over25;
             ourBttsYes = pred.bttsYes;
+            expHome    = eg.expectedHome;
+            expAway    = eg.expectedAway;
           }
         }
       } else {
@@ -158,6 +163,29 @@ export async function GET(req: NextRequest) {
           ? [{ market: "BTTS Ja",        ourProb: ourBttsYes, odds: match.bestBttsYes.odds, bookmaker: match.bestBttsYes.bookmaker }]
           : []),
       ];
+
+      // Asian Handicap — Poisson score-matrise gir presise AH-probs
+      if (expHome !== null && expAway !== null && match.ahLine !== null) {
+        const ahLine = match.ahLine;
+        const ahResult = poissonAH(expHome, expAway, ahLine);
+        const lineStr = (l: number) => `${l > 0 ? "+" : ""}${l}`;
+        if (match.bestAhHome) {
+          candidates.push({
+            market: `AH Hjemme (${lineStr(ahLine)})`,
+            ourProb: ahResult.homeWin + 0.5 * ahResult.push,
+            odds: match.bestAhHome.odds,
+            bookmaker: match.bestAhHome.bookmaker,
+          });
+        }
+        if (match.bestAhAway) {
+          candidates.push({
+            market: `AH Borte (${lineStr(-ahLine)})`,
+            ourProb: ahResult.awayWin + 0.5 * ahResult.push,
+            odds: match.bestAhAway.odds,
+            bookmaker: match.bestAhAway.bookmaker,
+          });
+        }
+      }
 
       for (const c of candidates) {
         if (!c.odds || c.odds <= 1 || !c.ourProb) continue;
