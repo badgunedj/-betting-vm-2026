@@ -1,7 +1,13 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MatchAnalysis } from "@/lib/analyze";
 import { MatchOdds } from "@/lib/odds-api";
+import {
+  saveAnalysis,
+  loadAnalysis,
+  deleteAnalysis,
+  makeMatchKey,
+} from "@/lib/analysis-store";
 
 interface Props {
   homeTeam: string;
@@ -63,13 +69,39 @@ export default function MatchCard({
   homeTeam, awayTeam, homeTeamId, awayTeamId,
   leagueId, leagueName, date, sport, bankroll, preloadedOdds,
 }: Props) {
+  const matchKey = makeMatchKey(homeTeam, awayTeam, date);
+
   const [analysis, setAnalysis] = useState<MatchAnalysis | null>(null);
   const [odds, setOdds] = useState<MatchOdds | null>(preloadedOdds ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
 
-  async function runAnalysis() {
+  // Last inn lagret analyse ved oppstart
+  useEffect(() => {
+    const saved = loadAnalysis(matchKey);
+    if (saved) {
+      setAnalysis(saved.analysis);
+      if (saved.odds) setOdds(saved.odds);
+      setFromCache(true);
+      setOpen(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchKey]);
+
+  async function runAnalysis(forceRefresh = false) {
+    // Bruk cache hvis tilgjengelig og ikke tvungen oppdatering
+    if (!forceRefresh) {
+      const saved = loadAnalysis(matchKey);
+      if (saved) {
+        setAnalysis(saved.analysis);
+        if (saved.odds) setOdds(saved.odds);
+        setFromCache(true);
+        setOpen(true);
+        return;
+      }
+    }
     setLoading(true);
     setError(null);
     try {
@@ -87,7 +119,20 @@ export default function MatchCard({
       if (!res.ok) throw new Error(data.error ?? "Feil");
       setAnalysis(data.analysis);
       setOdds(data.odds);
+      setFromCache(false);
       setOpen(true);
+
+      // Lagre til localStorage
+      saveAnalysis({
+        key: matchKey,
+        homeTeam,
+        awayTeam,
+        date,
+        sport,
+        analysis: data.analysis,
+        odds: data.odds ?? null,
+        savedAt: new Date().toISOString(),
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Noe gikk galt");
     } finally {
@@ -112,21 +157,55 @@ export default function MatchCard({
           <span className="font-bold text-lg flex-1">{awayTeam}</span>
         </div>
 
-        <div className="mt-4 flex justify-between items-center">
-          <button
-            onClick={() => setOpen(!open)}
-            className="text-xs text-[#64748b] hover:text-white transition-colors"
-          >
-            {open ? "▲ Lukk" : "▼ Detaljer"}
-          </button>
-          <button
-            onClick={runAnalysis}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-semibold transition-all
-              bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white"
-          >
-            {loading ? "Analyserer..." : "⚡ Analyser kamp"}
-          </button>
+        <div className="mt-4 flex justify-between items-center gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setOpen(!open)}
+              className="text-xs text-[#64748b] hover:text-white transition-colors"
+            >
+              {open ? "▲ Lukk" : "▼ Detaljer"}
+            </button>
+            {fromCache && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-950 text-blue-400 font-semibold">
+                💾 Lagret
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            {fromCache && (
+              <>
+                <button
+                  onClick={() => {
+                    deleteAnalysis(matchKey);
+                    setAnalysis(null);
+                    setFromCache(false);
+                    setOpen(false);
+                  }}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold transition-all
+                    border border-red-800 text-red-400 hover:bg-red-950"
+                  title="Slett lagret analyse"
+                >
+                  🗑
+                </button>
+                <button
+                  onClick={() => runAnalysis(true)}
+                  disabled={loading}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold transition-all
+                    border border-[#2a2d3a] text-[#64748b] hover:text-white disabled:opacity-50"
+                >
+                  {loading ? "..." : "🔄"}
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => runAnalysis(false)}
+              disabled={loading}
+              className="px-4 py-2 rounded-lg text-sm font-semibold transition-all
+                bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white"
+            >
+              {loading ? "Analyserer..." : fromCache ? "📊 Vis analyse" : "⚡ Analyser kamp"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -269,7 +348,9 @@ export default function MatchCard({
           )}
 
           <p className="text-xs text-[#64748b]">
-            Analysert: {new Date(analysis.generatedAt).toLocaleString("nb-NO")}
+            {fromCache ? "💾 Lagret analyse — " : "⚡ Analysert: "}
+            {new Date(analysis.generatedAt).toLocaleString("nb-NO")}
+            {fromCache && " · Trykk 🔄 for fersk analyse"}
           </p>
         </div>
       )}

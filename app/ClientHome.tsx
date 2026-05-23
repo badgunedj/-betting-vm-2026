@@ -2,9 +2,10 @@
 import { useState, useEffect } from "react";
 import MatchCard from "@/components/MatchCard";
 import BankrollTracker from "@/components/BankrollTracker";
+import AnalysisHistory from "@/components/AnalysisHistory";
 import { MatchOdds } from "@/lib/odds-api";
 
-type Tab = "eliteserien" | "worldcup" | "logg";
+type Tab = "eliteserien" | "worldcup" | "historikk" | "logg";
 
 interface Fixture {
   fixture: { id: string | number; date: string };
@@ -39,7 +40,8 @@ export default function ClientHome({ startBankroll }: { startBankroll: number })
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "eliteserien", label: "🇳🇴 Eliteserien", count: eliteserienFixtures.length },
     { key: "worldcup", label: "🌍 VM 2026", count: wmFixtures.length },
-    { key: "logg", label: "📊 Bettinglogg" },
+    { key: "historikk", label: "💾 Historikk" },
+    { key: "logg", label: "📊 Logg" },
   ];
 
   return (
@@ -67,6 +69,8 @@ export default function ClientHome({ startBankroll }: { startBankroll: number })
       {/* Innhold */}
       {tab === "logg" ? (
         <BankrollTracker startBankroll={startBankroll} />
+      ) : tab === "historikk" ? (
+        <AnalysisHistory />
       ) : loading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
