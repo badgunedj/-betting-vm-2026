@@ -81,11 +81,13 @@ export async function analyzeMatch(
     : "";
 
   // ── ELO-seksjon ──
+  const hasNationalElo = elo?.homeElo && elo?.awayElo && !poisson; // VM = ingen Poisson
+  const eloLabel = hasNationalElo ? "NASJONAL ELO (nøytral bane)" : "CLUB ELO (styrkerating)";
   const eloSection = elo?.homeElo && elo?.awayElo
-    ? `\nCLUB ELO (styrkerating):
+    ? `\n${eloLabel}:
 - ${homeTeam}: ${elo.homeElo.toFixed(0)} ELO
 - ${awayTeam}: ${elo.awayElo.toFixed(0)} ELO
-- Differanse: ${(elo.eloDiff ?? 0) > 0 ? "+" : ""}${(elo.eloDiff ?? 0).toFixed(0)} (ELO-basert hjemmevinnsjanse: ${pct(elo.eloHomeWinProb ?? 0)})`
+- Differanse: ${(elo.eloDiff ?? 0) > 0 ? "+" : ""}${(elo.eloDiff ?? 0).toFixed(0)} → ELO-vinnsjanse: ${pct(elo.eloHomeWinProb ?? 0)}`
     : "";
 
   // ── Værseksjon ──

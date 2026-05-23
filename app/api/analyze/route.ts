@@ -6,6 +6,7 @@ import { findTeamInfo } from "@/lib/team-map";
 import { getClubElos } from "@/lib/club-elo";
 import { getMatchWeather } from "@/lib/weather";
 import { expectedGoalsFromForm, poissonPredict } from "@/lib/poisson";
+import { getNationalEloResult } from "@/lib/national-elo";
 
 // Vercel Hobby plan: 10 sek maks — gi hvert kall 3 sek timeout
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -38,8 +39,13 @@ export async function POST(req: NextRequest) {
 
     const TIMEOUT = 3500; // 3.5 sek per kall
 
+    // For VM: bruk nasjonal-ELO direkte (ingen API-kall, ingen timeout-risiko)
+    const nationalElo = !isEliteserien
+      ? getNationalEloResult(homeTeam, awayTeam)
+      : null;
+
     // Hent datakilder parallelt med timeout — alle feiler gracefully
-    const [homeForm, awayForm, h2h, elo, weather] = await Promise.all([
+    const [homeForm, awayForm, h2h, clubElo, weather] = await Promise.all([
       homeInfo && isEliteserien
         ? withTimeout(getTeamForm(homeInfo.apiFootballId, homeInfo.leagueId), TIMEOUT, null)
         : Promise.resolve(null),
@@ -69,6 +75,9 @@ export async function POST(req: NextRequest) {
         : Promise.resolve(null),
     ]);
 
+    // Kombiner ELO-kilder: nasjonal-ELO for VM, club ELO for Eliteserien
+    const elo = nationalElo ?? clubElo;
+
     // Poisson-modell fra sesongstatistikk
     let poissonPred = null;
     if (homeForm && awayForm) {
@@ -85,10 +94,10 @@ export async function POST(req: NextRequest) {
       h2h ?? { homeWins: 0, awayWins: 0, draws: 0, matches: [] },
       matchOdds,
       bankroll ?? 5000,
-      elo ?? null,
+      elo,
       weather ?? null,
       poissonPred,
-      [], // injuries: utelates for å spare tid og API-kvote
+      [],
       [],
     );
 
