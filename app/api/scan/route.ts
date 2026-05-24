@@ -2,9 +2,42 @@ import { NextResponse } from "next/server";
 import {
   getMatchOdds, SPORTS,
   impliedProbability, valueEdge, kellyStake, MAX_BOOKMAKER_MARGIN,
+  type BookmakerOdds,
 } from "@/lib/odds-api";
 import { getTeamStats2026 } from "@/lib/eliteserien-stats";
 import { expectedGoalsFromForm, poissonPredict, poissonAH } from "@/lib/poisson";
+
+/**
+ * Beregn markedskonsensus for H2H-utfall fra tilgjengelige bookmakers.
+ * Fjerner margin per bookmaker og tar gjennomsnitt — gir "syntetisk Pinnacle"
+ * når ekte Pinnacle mangler. Brukes som referansesannsynlighet for PL.
+ */
+function marketConsensus(
+  bookmakers: BookmakerOdds[],
+): { homeProb: number; drawProb: number; awayProb: number } | null {
+  const usable = bookmakers.filter(
+    b => b.bookmaker !== "pinnacle"
+      && b.margin <= MAX_BOOKMAKER_MARGIN
+      && b.homeWin > 1 && b.draw > 1 && b.awayWin > 1
+  );
+  if (usable.length === 0) return null;
+
+  let sumH = 0, sumD = 0, sumA = 0;
+  for (const bk of usable) {
+    const rawH = 1 / bk.homeWin;
+    const rawD = 1 / bk.draw;
+    const rawA = 1 / bk.awayWin;
+    const tot  = rawH + rawD + rawA;   // >1 pga margin
+    sumH += rawH / tot;
+    sumD += rawD / tot;
+    sumA += rawA / tot;
+  }
+  return {
+    homeProb: sumH / usable.length,
+    drawProb: sumD / usable.length,
+    awayProb: sumA / usable.length,
+  };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -88,8 +121,28 @@ export async function GET(req: Request) {
           };
           usedPinnacle = true;
         } else {
-          // Ingen Pinnacle → ren Poisson med ligasnitt (lavere presisjon)
-          pred = base;
+          // Ingen Pinnacle → markedskonsensus (margin-justert snitt av Betsson/Betway)
+          // Mye bedre enn ligasnitt: bruker kamp-spesifikke odds som referanse.
+          // Fanger stale odds / "soft"-bookmakers der én avviker fra markedet.
+          const consensus = marketConsensus(match.bookmakers);
+          if (consensus) {
+            const { homeProb, drawProb, awayProb } = consensus;
+            const decide = homeProb + awayProb;
+            pred = {
+              ...base,
+              homeWin: homeProb,
+              draw:    drawProb,
+              awayWin: awayProb,
+              dc1X:    homeProb + drawProb,
+              dcX2:    drawProb + awayProb,
+              dc12:    homeProb + awayProb,
+              dnbHome: decide > 0 ? homeProb / decide : 0.5,
+              dnbAway: decide > 0 ? awayProb / decide : 0.5,
+            };
+          } else {
+            // Ingen brukbare bookmakers → hopp over
+            continue;
+          }
           usedPinnacle = false;
         }
 
