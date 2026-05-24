@@ -172,7 +172,7 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
             <span className="font-bold text-white text-sm">Dagens tips</span>
             <span className="ml-2 text-xs text-[#64748b]">
             {sport === "premierleague"
-              ? "— PL ligasnitt-Poisson (ingen lagstats)"
+              ? "— Pinnacle-kalibrert + Poisson"
               : "— Poisson-scan av alle kamper"}
           </span>
           </div>
@@ -262,6 +262,12 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                       {BOABET_MARKET_GUIDE[bet.market] && (
                         <span className="text-xs px-2 py-0.5 rounded-full bg-[#1a2a1a] text-green-400 whitespace-nowrap">
                           🦁 {BOABET_MARKET_GUIDE[bet.market]}
+                        </span>
+                      )}
+                      {bet.pinnacleRef && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-[#1a1a2e] text-blue-400 whitespace-nowrap"
+                          title="Sannsynlighet basert på Pinnacle (verdens skarpeste bookmaker)">
+                          📌 Pinnacle-ref
                         </span>
                       )}
                     </div>
