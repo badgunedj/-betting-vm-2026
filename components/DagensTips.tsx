@@ -328,7 +328,7 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                           <span className="text-[10px] text-[#64748b] whitespace-nowrap">
                             {eventId
                               ? <span className="text-green-500">✓ kamp funnet</span>
-                              : <span className="text-amber-500">Søk: {bet.homeTeam.split(" ").pop()} – {bet.awayTeam.split(" ").pop()}</span>
+                              : <span className="text-amber-500">Søk: «{bet.homeTeam.split(/[\s/]/).pop()}»</span>
                             }
                           </span>
                         </div>
