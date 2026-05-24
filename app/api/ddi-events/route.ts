@@ -66,7 +66,13 @@ function xorDecode(bytes: Uint8Array): string {
 }
 
 function normalizeTeam(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, " ").trim();
+  return name
+    .toLowerCase()
+    .replace(/ø/g, "o").replace(/æ/g, "ae").replace(/å/g, "a")  // Norwegian chars
+    .replace(/[/\-_]/g, " ")                                      // separators → space
+    .replace(/\bfc\b|\bsk\b|\bif\b|\bfk\b|\bik\b/g, "")        // drop common suffixes
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function toEventList(raw: Array<{ id: number; home: string; away: string; date?: string }>) {

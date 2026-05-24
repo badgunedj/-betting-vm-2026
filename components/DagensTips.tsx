@@ -37,9 +37,15 @@ const BOABET_EVENT   = "https://play.1-boabet-eu.com/en/sports/sportsbook/event-
 const BOABET_CHAMP   = 5106;
 const BOABET_COUNTRY = 1388;
 
-/** Normaliser lagnavn for oppslag i event-kart */
+/** Normaliser lagnavn for oppslag i event-kart (må matche route.ts) */
 function normalizeTeam(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, " ").trim();
+  return name
+    .toLowerCase()
+    .replace(/ø/g, "o").replace(/æ/g, "ae").replace(/å/g, "a")  // norske tegn
+    .replace(/[/\-_]/g, " ")                                      // separatorer → space
+    .replace(/\bfc\b|\bsk\b|\bif\b|\bfk\b|\bik\b/g, "")        // fjern suffikser
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Direktelenke til kamp om vi har event-ID, ellers søk */
