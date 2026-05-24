@@ -94,12 +94,13 @@ function boaBetUrl(
 ): string {
   const id = findEventId(homeTeam, awayTeam, eventMap, eventList);
   if (id) {
+    // Rekkefølge fra HAR/GA: sport, country, champ, event, live, supertip
     const p = new URLSearchParams({
-      champ:    String(BOABET_CHAMP),
+      sport:    "1",
       country:  String(BOABET_COUNTRY),
+      champ:    String(BOABET_CHAMP),
       event:    String(id),
       live:     "0",
-      sport:    "1",
       supertip: "0",
     });
     return `${BOABET_EVENT}?${p}`;
