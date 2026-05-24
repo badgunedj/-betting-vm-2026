@@ -48,10 +48,51 @@ function normalizeTeam(name: string): string {
     .trim();
 }
 
-/** Direktelenke til kamp om vi har event-ID, ellers søk */
-function boaBetUrl(homeTeam: string, awayTeam: string, eventMap: Map<string, number>): string {
+/** Finn event-ID med eksakt eller fuzzy matching */
+function findEventId(
+  homeTeam: string,
+  awayTeam: string,
+  eventMap: Map<string, number>,
+  eventList: Array<{ id: number; home: string; away: string; key: string }>,
+): number | undefined {
+  // 1. Eksakt nøkkel-match
   const key = `${normalizeTeam(homeTeam)}|${normalizeTeam(awayTeam)}`;
-  const id  = eventMap.get(key);
+  const exact = eventMap.get(key);
+  if (exact) return exact;
+
+  // 2. Fuzzy: finn beste treff via ord-overlapp (hjemmelag prioritert)
+  const homeWords = new Set(normalizeTeam(homeTeam).split(" ").filter(w => w.length >= 3));
+  const awayWords = new Set(normalizeTeam(awayTeam).split(" ").filter(w => w.length >= 3));
+
+  let bestId: number | undefined;
+  let bestScore = 0;
+
+  for (const ev of eventList) {
+    const evHome = new Set(ev.home.split(" ").filter(w => w.length >= 3));
+    const evAway = new Set(ev.away.split(" ").filter(w => w.length >= 3));
+    // Ord-overlapp: teller felles ord mellom scan og DDI lagnavn
+    const homeOverlap = [...homeWords].filter(w => evHome.has(w) ||
+      [...evHome].some(eh => eh.startsWith(w) || w.startsWith(eh))).length;
+    const awayOverlap = [...awayWords].filter(w => evAway.has(w) ||
+      [...evAway].some(ea => ea.startsWith(w) || w.startsWith(ea))).length;
+    const score = homeOverlap * 2 + awayOverlap;
+    if (score > bestScore && homeOverlap >= 1) {
+      bestScore = score;
+      bestId = ev.id;
+    }
+  }
+
+  return bestId;
+}
+
+/** Direktelenke til kamp om vi har event-ID, ellers søk */
+function boaBetUrl(
+  homeTeam: string,
+  awayTeam: string,
+  eventMap: Map<string, number>,
+  eventList: Array<{ id: number; home: string; away: string; key: string }>,
+): string {
+  const id = findEventId(homeTeam, awayTeam, eventMap, eventList);
   if (id) {
     const p = new URLSearchParams({
       champ:    String(BOABET_CHAMP),
@@ -119,6 +160,7 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
   const [expanded, setExpanded]   = useState(true);
   // Map: "home team|away team" (lowercase) → DDI Frame event ID
   const [eventMap, setEventMap]   = useState<Map<string, number>>(new Map());
+  const [eventList, setEventList] = useState<Array<{ id: number; home: string; away: string; key: string }>>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,11 +183,11 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
       if (ddiRes.status === "fulfilled" && ddiRes.value.ok) {
         const ddi = await ddiRes.value.json();
         if (Array.isArray(ddi.events) && ddi.events.length > 0) {
-          const map = new Map<string, number>();
-          for (const ev of ddi.events as { key: string; id: number }[]) {
-            map.set(ev.key, ev.id);
-          }
+          const list = ddi.events as Array<{ id: number; home: string; away: string; key: string }>;
+          const map  = new Map<string, number>();
+          for (const ev of list) map.set(ev.key, ev.id);
           setEventMap(map);
+          setEventList(list);
         }
       }
     } catch {
@@ -308,7 +350,7 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                       <p className={edgeColor(bet.edgePct)}>+{bet.edgePct}%</p>
                     </div>
                     {(() => {
-                      const boaHref   = boaBetUrl(bet.homeTeam, bet.awayTeam, eventMap);
+                      const boaHref   = boaBetUrl(bet.homeTeam, bet.awayTeam, eventMap, eventList);
                       const isDirect  = boaHref.includes("event-details");
                       const bkUrl     = BOOKMAKER_URLS[bet.bookmaker];
                       const bkName    = BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker;
