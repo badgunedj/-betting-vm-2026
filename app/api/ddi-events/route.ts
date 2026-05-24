@@ -1,121 +1,157 @@
 import { NextResponse } from "next/server";
 
 /**
- * Server-side proxy for SportDigi/DDI Frame event IDs.
+ * Server-side proxy for DDI Frame / SportDigi pre-match event IDs.
  *
- * Fra DevTools på BoaBet (24.05.2026):
- * - Riktig API: sp-spc-api.sportdigi.com (IKKE sport.ddiframe.com)
- * - Origin/Referer: https://sport.ddiframe.com
- * - Accept: application/x-msgpack (men JSON fungerer også)
- * - PartnerId: 188a1665-3c7b-48aa-a143-6764c719955f
- * - Event-ID format: 8-sifret tall (f.eks. 37593384)
+ * Endpoint funnet via HAR-analyse (24.05.2026):
+ *   sport.ddiframe.com/{UUID}/prematch/geteventslist?champId=5106&...&partnerId=750
+ *
+ * Respons er XOR-encodet: første byte = XOR-nøkkel, resten er XOR'd JSON.
+ * Nullbytes (der raw-byte = XOR-nøkkel) fjernes etter dekoding.
+ *
+ * Kjøres som Edge Runtime slik at Cloudflare-beskyttelse forhåpentligvis bypass'es
+ * (Vercel Edge = Cloudflare Workers = same-network request).
  */
 
-export const dynamic  = "force-dynamic";
+export const runtime = "edge";
+export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const PARTNER   = "188a1665-3c7b-48aa-a143-6764c719955f";
-const API_BASE  = "https://sp-spc-api.sportdigi.com/api/v1/b2c/ScoutProvider";
-const HEADERS   = {
-  "Accept":          "application/json",
-  "Accept-Language": "en",
-  "Origin":          "https://sport.ddiframe.com",
-  "Referer":         "https://sport.ddiframe.com/",
-  "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-};
+const PARTNER_UUID = "188a1665-3c7b-48aa-a143-6764c719955f";
+const PARTNER_ID   = "750";          // numerisk partnerId i query string
 
-// Eliteserien 2026: sportId=1, countryId=1388, champId=5106
-const ELITESERIEN = { sportId: 1, countryId: 1388, champId: 5106 };
+// stakeTypes fra HAR (alle som BoaBet-appen bruker for Eliteserien)
+const STAKE_TYPES = [1, 702, 3, 2533, 2, 2532, 313638, 313639, 37, 402315];
 
-const ENDPOINTS = [
-  // Forsøk list-endepunkter — ulike SportDigi API-versjoner
-  `${API_BASE}/GetPreMatchData?partnerId=${PARTNER}&sportId=${ELITESERIEN.sportId}&countryId=${ELITESERIEN.countryId}&champId=${ELITESERIEN.champId}&langIsoCode=en`,
-  `${API_BASE}/GetEvents?partnerId=${PARTNER}&sportId=${ELITESERIEN.sportId}&countryId=${ELITESERIEN.countryId}&champId=${ELITESERIEN.champId}&langIsoCode=en`,
-  `${API_BASE}/GetSportTree?partnerId=${PARTNER}&sportId=${ELITESERIEN.sportId}&langIsoCode=en`,
-  `${API_BASE}/GetPreMatchTree?partnerId=${PARTNER}&langIsoCode=en`,
-  `${API_BASE}/GetChampionshipEvents?partnerId=${PARTNER}&champId=${ELITESERIEN.champId}&langIsoCode=en`,
-];
-
-/** Rekursiv søk etter event-objekter i ukjent JSON-struktur */
-function extractEvents(data: unknown, depth = 0): Array<{ key: string; id: number }> {
-  if (depth > 6 || !data || typeof data !== "object") return [];
-
-  const result: Array<{ key: string; id: number }> = [];
-  const obj = data as Record<string, unknown>;
-
-  // Prøv dette objektet som et event
-  const id = Number(obj.id ?? obj.eventId ?? obj.matchId ?? obj.EventId ?? obj.event_id ?? 0);
-  const home = String(obj.homeTeam ?? obj.home ?? obj.HomeName ?? obj.homeTeamName ?? obj.team1 ?? obj.home_team ?? "").toLowerCase().trim();
-  const away = String(obj.awayTeam ?? obj.away ?? obj.AwayName ?? obj.awayTeamName ?? obj.team2 ?? obj.away_team ?? "").toLowerCase().trim();
-
-  if (id > 1_000_000 && home && away) {
-    // ID > 1 million = sannsynligvis ekte DDI event-ID (8-sifret)
-    result.push({ key: `${home}|${away}`, id });
+function buildUrl(): string {
+  const params = new URLSearchParams({
+    champId:     "5106",
+    timeFilter:  "0",
+    langId:      "2",
+    partnerId:   PARTNER_ID,
+    countryCode: "NO",
+  });
+  for (const st of STAKE_TYPES) {
+    params.append("stakeTypes", String(st));
   }
+  return `https://sport.ddiframe.com/${PARTNER_UUID}/prematch/geteventslist?${params}`;
+}
 
-  // Rekurser inn i arrays og objekter
-  for (const val of Object.values(obj)) {
-    if (Array.isArray(val)) {
-      for (const item of val) result.push(...extractEvents(item, depth + 1));
-    } else if (val && typeof val === "object") {
-      result.push(...extractEvents(val, depth + 1));
-    }
+/** XOR-dekod DDI Frame respons:
+ *  - byte 0 = XOR-nøkkel
+ *  - byte 1.. = XOR'd JSON-tekst
+ *  - nullbytes (råbyte === nøkkel) strippes
+ */
+function xorDecode(bytes: Uint8Array): string {
+  const key = bytes[0];
+  const decoded: number[] = [];
+  for (let i = 1; i < bytes.length; i++) {
+    const b = bytes[i] ^ key;
+    if (b !== 0) decoded.push(b);
   }
+  return new TextDecoder().decode(new Uint8Array(decoded));
+}
 
-  return result;
+interface DdiEvent {
+  Id:   number;
+  N:    string;   // "Bodo Glimt - Brann"
+  HT:   string;   // Home team
+  AT:   string;   // Away team
+  D?:   string;   // ISO date
+  CId?: number;   // Championship ID
 }
 
 export async function GET() {
-  const errors: string[] = [];
+  const url = buildUrl();
 
-  for (const url of ENDPOINTS) {
-    try {
-      const res = await fetch(url, {
-        headers: HEADERS,
-        signal:  AbortSignal.timeout(6000),
-        cache:   "no-store",
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+        "Accept":          "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9,nb;q=0.8",
+        "Origin":          "https://sport.ddiframe.com",
+        "Referer":         "https://sport.ddiframe.com/",
+        "Sec-Fetch-Dest":  "empty",
+        "Sec-Fetch-Mode":  "cors",
+        "Sec-Fetch-Site":  "same-origin",
+      },
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      return NextResponse.json({
+        events: [],
+        source: null,
+        error:  `HTTP ${res.status} from sport.ddiframe.com`,
+        fetchedAt: new Date().toISOString(),
       });
-
-      if (!res.ok) {
-        errors.push(`${url.split("?")[0].split("/").pop()} → HTTP ${res.status}`);
-        continue;
-      }
-
-      // SportDigi kan returnere msgpack — prøv JSON uansett
-      let data: unknown;
-      const ct = res.headers.get("content-type") ?? "";
-      try {
-        data = await res.json();
-      } catch {
-        errors.push(`${url.split("?")[0].split("/").pop()} → ikke JSON (${ct})`);
-        continue;
-      }
-
-      const events = extractEvents(data);
-      if (events.length > 0) {
-        // Dedupliser (behold høyeste ID per lagpar)
-        const dedup = new Map<string, number>();
-        for (const { key, id } of events) {
-          if (!dedup.has(key) || id > dedup.get(key)!) dedup.set(key, id);
-        }
-        return NextResponse.json({
-          events:    [...dedup.entries()].map(([key, id]) => ({ key, id })),
-          source:    url.split("?")[0].split("/").pop(),
-          total:     dedup.size,
-          fetchedAt: new Date().toISOString(),
-        });
-      }
-
-      errors.push(`${url.split("?")[0].split("/").pop()} → 0 events`);
-    } catch (e: unknown) {
-      errors.push(`${String(e)}`);
     }
-  }
 
-  return NextResponse.json({
-    events:    [],
-    source:    null,
-    fetchedAt: new Date().toISOString(),
-    errors,
-  });
+    // Read raw bytes (response may be XOR-encoded or plain JSON)
+    const buf    = await res.arrayBuffer();
+    const bytes  = new Uint8Array(buf);
+    const first  = bytes[0];
+
+    let text: string;
+    // If first byte is a printable ASCII char that could start JSON, try plain first
+    if (first === 0x5b /* [ */ || first === 0x7b /* { */) {
+      text = new TextDecoder().decode(bytes);
+    } else {
+      // XOR decode: first byte = key
+      text = xorDecode(bytes);
+    }
+
+    let events: DdiEvent[];
+    try {
+      events = JSON.parse(text);
+    } catch (e) {
+      return NextResponse.json({
+        events: [],
+        source: null,
+        error:  `JSON parse failed: ${String(e)}. First bytes: ${Array.from(bytes.slice(0, 8)).map(b => b.toString(16)).join(" ")}`,
+        fetchedAt: new Date().toISOString(),
+      });
+    }
+
+    if (!Array.isArray(events) || events.length === 0) {
+      return NextResponse.json({
+        events: [],
+        source: "prematch/geteventslist",
+        error:  "Empty event array returned",
+        fetchedAt: new Date().toISOString(),
+      });
+    }
+
+    // Map to a minimal shape — key by normalized team names (lowercase, no accents stripped)
+    const result = events.map(ev => ({
+      id:   ev.Id,
+      name: ev.N,
+      home: ev.HT,
+      away: ev.AT,
+      date: ev.D ?? null,
+      // Normalized key for fuzzy matching in frontend
+      key:  `${normalizeTeam(ev.HT)}|${normalizeTeam(ev.AT)}`,
+    }));
+
+    return NextResponse.json({
+      events:    result,
+      source:    "prematch/geteventslist",
+      total:     result.length,
+      fetchedAt: new Date().toISOString(),
+    });
+
+  } catch (e: unknown) {
+    return NextResponse.json({
+      events: [],
+      source: null,
+      error:  String(e),
+      fetchedAt: new Date().toISOString(),
+    });
+  }
+}
+
+function normalizeTeam(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, " ").trim();
 }

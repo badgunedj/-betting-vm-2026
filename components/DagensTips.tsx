@@ -32,70 +32,51 @@ const BOOKMAKER_URLS: Record<string, string> = {
   betway:  "https://www.betway.com",
 };
 
-// BoaBet URL-struktur (fra devtools):
-//   Kamp-side:  /event-details?champ=5106&country=1388&event=EVENT_ID&live=0&sport=1&supertip=0
-//   Liga-side:  /pre-match?champ=5106&country=1388&sport=1&live=0
-//
-// champ=5106   = Eliteserien 2026-sesongen
-// country=1388 = Norge
-// sport=1      = fotball
-const BOABET_ELITESERIEN = {
-  champ:   5106,
-  country: 1388,
-  sport:   1,
-} as const;
+const BOABET_SEARCH  = "https://play.1-boabet-eu.com/en/sports/sportsbook/search";
+const BOABET_EVENT   = "https://play.1-boabet-eu.com/en/sports/sportsbook/event-details";
+const BOABET_CHAMP   = 5106;
+const BOABET_COUNTRY = 1388;
 
-const BOABET_EVENT_BASE = "https://play.1-boabet-eu.com/en/sports/sportsbook/event-details";
-const BOABET_HOME       = "https://play.1-boabet-eu.com/en/sports/sportsbook/";
-
-/** Fallback: åpner BoaBet sportsbooksiden (SPA prosesserer ikke champ/country-params fra ekstern nav) */
-function boaBetHomeUrl(): string {
-  return BOABET_HOME;
+/** Normaliser lagnavn for oppslag i event-kart */
+function normalizeTeam(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-/** Presis kamp-URL hvis vi kjenner event-ID */
-function boaBetEventUrl(eventId: number): string {
-  const { champ, country, sport } = BOABET_ELITESERIEN;
-  return `${BOABET_EVENT_BASE}?champ=${champ}&country=${country}&event=${eventId}&live=0&sport=${sport}&supertip=0`;
-}
-
-/** Hent event-IDer via server-side proxy (unngår CORS mot DDI Frame API).
- *  Returnerer Map<"homeTeam|awayTeam" (lowercase), eventId> */
-async function fetchDDIEventIds(): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
-  try {
-    const res = await fetch("/api/ddi-events", {
-      signal: AbortSignal.timeout(6000),
+/** Direktelenke til kamp om vi har event-ID, ellers søk */
+function boaBetUrl(homeTeam: string, awayTeam: string, eventMap: Map<string, number>): string {
+  const key = `${normalizeTeam(homeTeam)}|${normalizeTeam(awayTeam)}`;
+  const id  = eventMap.get(key);
+  if (id) {
+    const p = new URLSearchParams({
+      champ:    String(BOABET_CHAMP),
+      country:  String(BOABET_COUNTRY),
+      event:    String(id),
+      live:     "0",
+      sport:    "1",
+      supertip: "0",
     });
-    if (!res.ok) return map;
-    const data = await res.json() as {
-      events: Array<{ key: string; id: number }>;
-    };
-    for (const { key, id } of data.events ?? []) {
-      if (key && id) map.set(key, id);
-    }
-  } catch { /* ignore — bruker fallback */ }
-  return map;
+    return `${BOABET_EVENT}?${p}`;
+  }
+  return boaBetSearchUrl(homeTeam);
 }
 
-/** Finn best-match event-ID ved fuzzy-matching av lagnavn */
-function findEventId(
-  homeTeam: string,
-  awayTeam: string,
-  eventMap: Map<string, number>
-): number | null {
-  const hLow = homeTeam.toLowerCase();
-  const aLow = awayTeam.toLowerCase();
-  // Eksakt match
-  const exact = eventMap.get(`${hLow}|${aLow}`);
-  if (exact) return exact;
-  // Delvis match (f.eks. "Bodø/Glimt" vs "bodo/glimt")
-  for (const [key, id] of eventMap) {
-    const [h, a] = key.split("|");
-    if ((h.includes(hLow) || hLow.includes(h)) &&
-        (a.includes(aLow) || aLow.includes(a))) return id;
-  }
-  return null;
+/** Fallback søke-URL */
+function boaBetSearchUrl(homeTeam: string): string {
+  const SKIP = new Set(["oslo", "bergen", "city", "town", "united"]);
+  const words = homeTeam.split(/[\s/]+/);
+  const best  = words.find(w => w.length >= 4 && !SKIP.has(w.toLowerCase()))
+             ?? words[0]
+             ?? homeTeam;
+  return `${BOABET_SEARCH}?q=${encodeURIComponent(best)}`;
+}
+
+/** Visningstekst for søkeordet (brukes kun når direktelenke mangler) */
+function boaBetSearchTerm(homeTeam: string): string {
+  const SKIP = new Set(["oslo", "bergen", "city", "town", "united"]);
+  const words = homeTeam.split(/[\s/]+/);
+  return words.find(w => w.length >= 4 && !SKIP.has(w.toLowerCase()))
+      ?? words[0]
+      ?? homeTeam;
 }
 
 function formatKickoff(iso: string) {
@@ -130,22 +111,37 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
   const [scannedAt, setScannedAt] = useState<string | null>(null);
   const [error, setError]         = useState(false);
   const [expanded, setExpanded]   = useState(true);
-  // DDI Frame event-IDer: "homeTeam|awayTeam" → eventId
+  // Map: "home team|away team" (lowercase) → DDI Frame event ID
   const [eventMap, setEventMap]   = useState<Map<string, number>>(new Map());
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
-      // Hent value bets + event-IDer parallelt
-      const [scanRes, ddiMap] = await Promise.all([
+      // Hent scan og event-IDs parallelt
+      const [scanRes, ddiRes] = await Promise.allSettled([
         fetch(`/api/scan?sport=${sport}`),
-        sport === "eliteserien" ? fetchDDIEventIds() : Promise.resolve(new Map<string, number>()),
+        fetch("/api/ddi-events"),
       ]);
-      const data = await scanRes.json();
-      setBets(data.bets ?? []);
-      setScannedAt(data.scannedAt ?? null);
-      setEventMap(ddiMap);
+
+      if (scanRes.status === "fulfilled" && scanRes.value.ok) {
+        const data = await scanRes.value.json();
+        setBets(data.bets ?? []);
+        setScannedAt(data.scannedAt ?? null);
+      } else {
+        setError(true);
+      }
+
+      if (ddiRes.status === "fulfilled" && ddiRes.value.ok) {
+        const ddi = await ddiRes.value.json();
+        if (Array.isArray(ddi.events) && ddi.events.length > 0) {
+          const map = new Map<string, number>();
+          for (const ev of ddi.events as { key: string; id: number }[]) {
+            map.set(ev.key, ev.id);
+          }
+          setEventMap(map);
+        }
+      }
     } catch {
       setError(true);
     } finally {
@@ -306,22 +302,27 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                       <p className={edgeColor(bet.edgePct)}>+{bet.edgePct}%</p>
                     </div>
                     {(() => {
-                      const eventId    = findEventId(bet.homeTeam, bet.awayTeam, eventMap);
-                      const boaHref    = eventId ? boaBetEventUrl(eventId) : boaBetHomeUrl();
-                      const boaLabel   = eventId ? "🦁 Bet direkte →" : "🦁 BoaBet →";
-                      const bkUrl      = BOOKMAKER_URLS[bet.bookmaker];
-                      const bkName     = BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker;
+                      const boaHref   = boaBetUrl(bet.homeTeam, bet.awayTeam, eventMap);
+                      const isDirect  = boaHref.includes("event-details");
+                      const bkUrl     = BOOKMAKER_URLS[bet.bookmaker];
+                      const bkName    = BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker;
+                      const term      = boaBetSearchTerm(bet.homeTeam);
                       return (
                         <div className="flex flex-col items-end gap-1">
                           <a
                             href={boaHref}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500
-                              text-white text-xs font-semibold transition-colors whitespace-nowrap"
-                            title={`Søk etter «${bet.homeTeam} – ${bet.awayTeam}» på BoaBet`}
+                            className={`px-3 py-1.5 rounded-lg text-white text-xs font-semibold
+                              transition-colors whitespace-nowrap
+                              ${isDirect
+                                ? "bg-green-700 hover:bg-green-600"
+                                : "bg-amber-600 hover:bg-amber-500"}`}
+                            title={isDirect
+                              ? "Direktelenke til kampen på BoaBet"
+                              : `Åpner BoaBet-søk for «${term}» — klikk kampen for å bette`}
                           >
-                            {boaLabel}
+                            🦁 {isDirect ? "Gå til kamp ↗" : "Finn kamp ↗"}
                           </a>
                           {bkUrl && (
                             <a
@@ -335,12 +336,11 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                               {bkName} {bet.odds.toFixed(2)} ↗
                             </a>
                           )}
-                          <span className="text-[10px] text-[#64748b] whitespace-nowrap">
-                            {eventId
-                              ? <span className="text-green-500">✓ kamp funnet</span>
-                              : <span className="text-amber-500">Søk: «{bet.homeTeam.split(/[\s/]/).pop()}»</span>
-                            }
-                          </span>
+                          {!isDirect && (
+                            <span className="text-[10px] text-amber-500/80 whitespace-nowrap">
+                              Søk: «{term}»
+                            </span>
+                          )}
                         </div>
                       );
                     })()}
