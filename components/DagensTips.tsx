@@ -162,6 +162,9 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
   // Map: "home team|away team" (lowercase) → DDI Frame event ID
   const [eventMap, setEventMap]   = useState<Map<string, number>>(new Map());
   const [eventList, setEventList] = useState<Array<{ id: number; home: string; away: string; key: string }>>([]);
+  // Kelly-fraksjon: 1 = ¼ Kelly (default/safe), 2 = ½ Kelly, 4 = Full Kelly
+  // Scan-ruten beregner allerede ¼ Kelly — vi multipliserer for display
+  const [kellyMult, setKellyMult] = useState<1 | 2 | 4>(1);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -201,7 +204,7 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
   useEffect(() => { load(); }, [load]);
 
   // Vis komprimert header hvis ingen tips
-  const totalEV = bets.reduce((s, b) => s + b.evNOK, 0);
+  const totalEV = Math.round(bets.reduce((s, b) => s + b.evNOK, 0) * kellyMult);
 
   return (
     <div className="rounded-xl border border-[#2a2d3a] bg-[#12151f] overflow-hidden">
@@ -248,6 +251,40 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
       {/* ── Innhold ────────────────────────────────────────────────────────── */}
       {expanded && (
         <div className="border-t border-[#2a2d3a]">
+
+          {/* ── Kelly-fraksjon velger ─────────────────────────────────────── */}
+          {!loading && bets.length > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-[#0d0f19] border-b border-[#1e2235]">
+              <span className="text-xs text-[#64748b] mr-1">Innsatsstørrelse:</span>
+              {([
+                { mult: 1 as const, label: "¼ Kelly",    desc: "Trygg (25%)" },
+                { mult: 2 as const, label: "½ Kelly",    desc: "Moderat (50%)" },
+                { mult: 4 as const, label: "Full Kelly", desc: "Aggressiv (100%)" },
+              ] as const).map(({ mult, label, desc }) => (
+                <button
+                  key={mult}
+                  onClick={() => setKellyMult(mult)}
+                  title={desc}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap
+                    ${kellyMult === mult
+                      ? mult === 1
+                        ? "bg-blue-700 text-white"
+                        : mult === 2
+                          ? "bg-amber-700 text-white"
+                          : "bg-red-800 text-white"
+                      : "bg-[#1e2235] text-[#64748b] hover:text-white hover:bg-[#2a2d3a]"}`}
+                >
+                  {label}
+                </button>
+              ))}
+              <span className="ml-auto text-[10px] text-[#3a4060] hidden sm:block">
+                {kellyMult === 1 && "Anbefalt — lavere varians, bærekraftig langsiktig"}
+                {kellyMult === 2 && "Halvparten av optimal — balansert risiko"}
+                {kellyMult === 4 && "⚠ Full Kelly — høy varians, kun for erfarne"}
+              </span>
+            </div>
+          )}
+
           {loading ? (
             <div className="p-4 space-y-2">
               {[1, 2, 3].map(i => (
@@ -340,11 +377,15 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                   <div className="flex items-center gap-3 flex-shrink-0 text-right">
                     <div className="hidden sm:block text-xs text-[#64748b]">
                       <p>Innsats</p>
-                      <p className="text-white font-mono font-bold">{bet.stake} kr</p>
+                      <p className="text-white font-mono font-bold">
+                        {Math.round(bet.stake * kellyMult)} kr
+                      </p>
                     </div>
                     <div className="hidden sm:block text-xs text-[#64748b]">
                       <p>EV</p>
-                      <p className="text-green-400 font-mono font-bold">+{bet.evNOK} kr</p>
+                      <p className="text-green-400 font-mono font-bold">
+                        +{Math.round(bet.evNOK * kellyMult)} kr
+                      </p>
                     </div>
                     <div className="text-xs">
                       <p className="text-[#64748b]">Edge</p>
