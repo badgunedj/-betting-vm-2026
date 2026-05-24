@@ -64,33 +64,34 @@ export async function GET(req: Request) {
       let usedPinnacle = false;
 
       if (isPL) {
-        // ── Premier League: Pinnacle som referanse ─────────────────────────
-        // Pinnacle er verdens skarpeste bookmaker (4-5% margin).
-        // Margin-justerte sannsynligheter fra Pinnacle er bransjens beste
-        // estimat på "sann" sannsynlighet — mye bedre enn ligasnitt.
-        // For mål-markeder (over/under, BTTS) bruker vi fortsatt Poisson-ligasnitt
-        // siden Pinnacle H2H ikke forteller oss mål-fordelingen.
-        if (!match.pinnacleRef) continue; // ingen Pinnacle → hopp over
-
-        const { homeProb, drawProb, awayProb } = match.pinnacleRef;
-        const decide = homeProb + awayProb; // uten uavgjort
-
-        // Base: Poisson med ligasnitt for mål-markeder
+        // ── Premier League: Pinnacle som referanse (med Poisson-fallback) ──
+        // Pinnacle er verdens skarpeste bookmaker — ideal referanse.
+        // Hvis Pinnacle-data mangler (API-plan, ingen odds ennå), faller vi
+        // tilbake på Poisson med PL-ligasnitt. Kvaliteten er lavere, men
+        // gir et brukbart baseline istedenfor å hoppe over kampen.
         const base = poissonPredict(PL_AVG_HOME, PL_AVG_AWAY);
 
-        // Override H2H, DC, DNB med Pinnacle-kalibrerte verdier
-        pred = {
-          ...base,
-          homeWin: homeProb,
-          draw:    drawProb,
-          awayWin: awayProb,
-          dc1X:    homeProb + drawProb,
-          dcX2:    drawProb + awayProb,
-          dc12:    homeProb + awayProb,
-          dnbHome: decide > 0 ? homeProb / decide : 0.5,
-          dnbAway: decide > 0 ? awayProb / decide : 0.5,
-        };
-        usedPinnacle = true;
+        if (match.pinnacleRef) {
+          const { homeProb, drawProb, awayProb } = match.pinnacleRef;
+          const decide = homeProb + awayProb;
+
+          pred = {
+            ...base,
+            homeWin: homeProb,
+            draw:    drawProb,
+            awayWin: awayProb,
+            dc1X:    homeProb + drawProb,
+            dcX2:    drawProb + awayProb,
+            dc12:    homeProb + awayProb,
+            dnbHome: decide > 0 ? homeProb / decide : 0.5,
+            dnbAway: decide > 0 ? awayProb / decide : 0.5,
+          };
+          usedPinnacle = true;
+        } else {
+          // Ingen Pinnacle → ren Poisson med ligasnitt (lavere presisjon)
+          pred = base;
+          usedPinnacle = false;
+        }
 
       } else {
         // ── Eliteserien: team-spesifikke stats + xG + form ─────────────────
