@@ -139,7 +139,7 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
     try {
       // Hent value bets + event-IDer parallelt
       const [scanRes, ddiMap] = await Promise.all([
-        fetch("/api/scan"),
+        fetch(`/api/scan?sport=${sport}`),
         sport === "eliteserien" ? fetchDDIEventIds() : Promise.resolve(new Map<string, number>()),
       ]);
       const data = await scanRes.json();
@@ -170,7 +170,11 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
           <span className="text-lg">🎯</span>
           <div>
             <span className="font-bold text-white text-sm">Dagens tips</span>
-            <span className="ml-2 text-xs text-[#64748b]">— Poisson-scan av alle kamper</span>
+            <span className="ml-2 text-xs text-[#64748b]">
+            {sport === "premierleague"
+              ? "— PL ligasnitt-Poisson (ingen lagstats)"
+              : "— Poisson-scan av alle kamper"}
+          </span>
           </div>
           {!loading && bets.length > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-green-900 text-green-300 text-xs font-bold">

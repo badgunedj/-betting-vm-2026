@@ -4,9 +4,10 @@ import { getMatchOdds, SPORTS } from "@/lib/odds-api";
 // Henter kamper fra The Odds API (fungerer gratis) istedet for API-Football
 export async function GET() {
   try {
-    const [eliteserien, worldCup] = await Promise.all([
+    const [eliteserien, worldCup, premierLeague] = await Promise.all([
       getMatchOdds(SPORTS.eliteserien),
       getMatchOdds(SPORTS.worldCup),
+      getMatchOdds(SPORTS.premierLeague).catch(() => []),
     ]);
 
     // Bygg et felles format
@@ -19,12 +20,13 @@ export async function GET() {
           away: { id: 0, name: m.awayTeam, logo: "" },
         },
         goals: { home: null, away: null },
-        odds: m, // send med odds direkte
+        odds: m,
       }));
 
     const fixtures = [
       ...toFixtures(eliteserien, 103, "Eliteserien"),
       ...toFixtures(worldCup, 1, "VM 2026"),
+      ...toFixtures(premierLeague, 39, "Premier League"),
     ].sort(
       (a, b) =>
         new Date(a.fixture.date).getTime() - new Date(b.fixture.date).getTime()

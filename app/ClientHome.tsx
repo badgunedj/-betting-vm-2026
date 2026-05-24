@@ -6,7 +6,7 @@ import AnalysisHistory from "@/components/AnalysisHistory";
 import DagensTips from "@/components/DagensTips";
 import { MatchOdds } from "@/lib/odds-api";
 
-type Tab = "eliteserien" | "worldcup" | "historikk" | "logg";
+type Tab = "eliteserien" | "premierleague" | "worldcup" | "historikk" | "logg";
 
 interface Fixture {
   fixture: { id: string | number; date: string };
@@ -17,11 +17,6 @@ interface Fixture {
   };
   odds?: MatchOdds;
 }
-
-const LEAGUE_TO_SPORT: Record<number, string> = {
-  103: "eliteserien",
-  1: "worldCup",
-};
 
 export default function ClientHome({ startBankroll }: { startBankroll: number }) {
   const [tab, setTab] = useState<Tab>("eliteserien");
@@ -36,29 +31,46 @@ export default function ClientHome({ startBankroll }: { startBankroll: number })
   }, []);
 
   const eliteserienFixtures = fixtures.filter((f) => f.league.id === 103);
-  const wmFixtures = fixtures.filter((f) => f.league.id === 1);
+  const plFixtures          = fixtures.filter((f) => f.league.id === 39);
+  const wmFixtures          = fixtures.filter((f) => f.league.id === 1);
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: "eliteserien", label: "🇳🇴 Eliteserien", count: eliteserienFixtures.length },
-    { key: "worldcup", label: "🌍 VM 2026", count: wmFixtures.length },
-    { key: "historikk", label: "💾 Historikk" },
-    { key: "logg", label: "📊 Logg" },
+    { key: "eliteserien",   label: "🇳🇴 Eliteserien",    count: eliteserienFixtures.length },
+    { key: "premierleague", label: "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", count: plFixtures.length },
+    { key: "worldcup",      label: "🌍 VM 2026",          count: wmFixtures.length },
+    { key: "historikk",     label: "💾 Historikk" },
+    { key: "logg",          label: "📊 Logg" },
   ];
+
+  const currentFixtures =
+    tab === "eliteserien"   ? eliteserienFixtures :
+    tab === "premierleague" ? plFixtures :
+    wmFixtures;
+
+  const currentSport =
+    tab === "eliteserien"   ? "eliteserien" :
+    tab === "premierleague" ? "premierleague" :
+    "worldCup";
+
+  const emptyText =
+    tab === "eliteserien"   ? "Ingen Eliteserien-kamper de neste 14 dagene" :
+    tab === "premierleague" ? "Ingen Premier League-kamper de neste 14 dagene" :
+    "VM starter 11. juni 2026 🚀";
 
   return (
     <div className="space-y-5">
-      {/* Dagens tips — automatisk Poisson-scan av alle kommende kamper */}
-      {(tab === "eliteserien" || tab === "worldcup") && (
+      {/* Dagens tips — automatisk Poisson-scan */}
+      {(tab === "eliteserien" || tab === "premierleague") && (
         <DagensTips bankroll={startBankroll} sport={tab} />
       )}
 
       {/* Tab-bar */}
-      <div className="flex gap-2 bg-[#1a1d27] rounded-xl p-1 border border-[#2a2d3a]">
+      <div className="flex gap-1 bg-[#1a1d27] rounded-xl p-1 border border-[#2a2d3a] overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`flex-1 py-2 px-2 rounded-lg text-sm font-semibold transition-all ${
+            className={`flex-1 py-2 px-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
               tab === t.key
                 ? "bg-green-700 text-white shadow"
                 : "text-[#64748b] hover:text-white"
@@ -66,7 +78,7 @@ export default function ClientHome({ startBankroll }: { startBankroll: number })
           >
             {t.label}
             {t.count !== undefined && t.count > 0 && (
-              <span className="ml-1 text-xs opacity-70">({t.count})</span>
+              <span className="ml-1 opacity-70">({t.count})</span>
             )}
           </button>
         ))}
@@ -85,14 +97,10 @@ export default function ClientHome({ startBankroll }: { startBankroll: number })
         </div>
       ) : (
         <MatchList
-          fixtures={tab === "eliteserien" ? eliteserienFixtures : wmFixtures}
-          sport={tab === "eliteserien" ? "eliteserien" : "worldCup"}
+          fixtures={currentFixtures}
+          sport={currentSport}
           bankroll={startBankroll}
-          emptyText={
-            tab === "eliteserien"
-              ? "Ingen Eliteserien-kamper de neste 14 dagene"
-              : "VM starter 11. juni 2026 🚀"
-          }
+          emptyText={emptyText}
         />
       )}
     </div>

@@ -26,9 +26,20 @@ export interface DagensTipsBet {
   evNOK:        number;
 }
 
-export async function GET() {
+// Premier League 2025/26 ligasnitt: ~2.7 mål/kamp → 1.35 per lag
+// Hjemmefordel 1.15× → home: 1.55, away: 1.17
+const PL_AVG_HOME = 1.55;
+const PL_AVG_AWAY = 1.17;
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const sport = searchParams.get("sport") ?? "eliteserien";
+  const isPL  = sport === "premierleague";
+
   try {
-    const matches = await getMatchOdds(SPORTS.eliteserien).catch(() => []);
+    const matches = await getMatchOdds(
+      isPL ? SPORTS.premierLeague : SPORTS.eliteserien
+    ).catch(() => []);
 
     const now       = Date.now();
     const maxFuture = now + 7 * 24 * 60 * 60 * 1000;
@@ -43,26 +54,33 @@ export async function GET() {
       );
       if (bettable.length === 0) continue;
 
-      // Team-stats (async lookup — hardkodet fallback er synkron)
-      const [hStats, aStats] = await Promise.all([
-        getTeamStats2026(match.homeTeam).catch(() => null),
-        getTeamStats2026(match.awayTeam).catch(() => null),
-      ]);
-      if (!hStats || !aStats || hStats.played < 3 || aStats.played < 3) continue;
+      let pred: ReturnType<typeof poissonPredict>;
 
-      const eg = expectedGoalsFromForm(
-        hStats.goalsFor, hStats.goalsAgainst, hStats.played,
-        aStats.goalsFor, aStats.goalsAgainst, aStats.played,
-        1.48,
-        hStats.form ?? "",
-        aStats.form ?? "",
-        1.0, 1.0,          // fatigue ikke tilgjengelig her — defaulter til 1
-        hStats.xgFor, hStats.xgAgainst,
-        aStats.xgFor, aStats.xgAgainst,
-      );
-      if (!eg) continue;
+      if (isPL) {
+        // Premier League: bruk ligasnitt direkte (ingen hardkodede lagstats)
+        // Gir rimelige base-sannsynligheter for å avdekke feilprisede markeder
+        pred = poissonPredict(PL_AVG_HOME, PL_AVG_AWAY);
+      } else {
+        // Eliteserien: bruk team-spesifikke stats + xG + form
+        const [hStats, aStats] = await Promise.all([
+          getTeamStats2026(match.homeTeam).catch(() => null),
+          getTeamStats2026(match.awayTeam).catch(() => null),
+        ]);
+        if (!hStats || !aStats || hStats.played < 3 || aStats.played < 3) continue;
 
-      const pred = poissonPredict(eg.expectedHome, eg.expectedAway);
+        const eg = expectedGoalsFromForm(
+          hStats.goalsFor, hStats.goalsAgainst, hStats.played,
+          aStats.goalsFor, aStats.goalsAgainst, aStats.played,
+          1.48,
+          hStats.form ?? "",
+          aStats.form ?? "",
+          1.0, 1.0,
+          hStats.xgFor, hStats.xgAgainst,
+          aStats.xgFor, aStats.xgAgainst,
+        );
+        if (!eg) continue;
+        pred = poissonPredict(eg.expectedHome, eg.expectedAway);
+      }
 
       // ── Alle markeder vi evaluerer ────────────────────────────────────────
       // NB: Over/Under 2.5 er UTELATT — BoaBet tilbyr ikke dette markedet
@@ -86,9 +104,11 @@ export async function GET() {
         ...(match.bestDnbAway ? [{ market: "Draw No Bet Borte",  ourProb: pred.dnbAway, odds: match.bestDnbAway.odds, bookmaker: match.bestDnbAway.bookmaker }] : []),
       ];
 
-      // Asian Handicap
+      // Asian Handicap — bruk predikerte forventede mål
+      const expHome = isPL ? PL_AVG_HOME : pred.expectedHomeGoals;
+      const expAway = isPL ? PL_AVG_AWAY : pred.expectedAwayGoals;
       if (match.ahLine !== null) {
-        const ah  = poissonAH(eg.expectedHome, eg.expectedAway, match.ahLine);
+        const ah  = poissonAH(expHome, expAway, match.ahLine);
         const ls  = (l: number) => `${l > 0 ? "+" : ""}${l}`;
         if (match.bestAhHome)
           candidates.push({ market: `AH Hjemme (${ls(match.ahLine)})`,  ourProb: ah.homeWin + 0.5 * ah.push, odds: match.bestAhHome.odds, bookmaker: match.bestAhHome.bookmaker });
