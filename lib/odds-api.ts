@@ -66,10 +66,11 @@ export interface MatchOdds {
 }
 
 // Bookmakers tilgjengelig for norske spillere (oppdatert mai 2026)
-// Unibet: forlot Norge nov. 2024 | Pinnacle: blokkert i Norge
-// NordicBet + Betsson (Betsson Group) er fortsatt tilgjengelig
-// Betway: internasjonalt, godtar norske spillere
-const BOOKMAKERS = ["nordicbet", "betsson", "betway", "pinnacle"];
+// NordicBet: BLOKKERT i Norge (country-blocked) — ekskludert
+// Unibet: forlot Norge nov. 2024 — ekskludert
+// Pinnacle: blokkert i Norge, men brukes som referanse for "sann pris"
+// Betsson + Betway: tilgjengelig i Norge → disse er bet-målene
+const BOOKMAKERS = ["betsson", "betway", "pinnacle"];
 
 // Beregn implisitt sannsynlighet (fjern margin)
 export function impliedProbability(odds: number): number {
@@ -356,10 +357,12 @@ export async function getMatchOdds(sport: string): Promise<MatchOdds[]> {
       });
     }
 
-    // Bare bookmakers som er tilgjengelig i Norge OG har akseptabel margin
-    // Pinnacle ekskluderes alltid fra bet-mål (blokkert + referanse-only)
+    // Bare bookmakers tilgjengelig i Norge OG akseptabel margin
+    // Pinnacle: referanse-only (blokkert i Norge)
+    // NordicBet: country-blocked i Norge
+    const BLOCKED = new Set(["pinnacle", "nordicbet"]);
     const bettable = bookmakers.filter(
-      b => b.bookmaker !== "pinnacle" && b.margin <= MAX_BOOKMAKER_MARGIN
+      b => !BLOCKED.has(b.bookmaker) && b.margin <= MAX_BOOKMAKER_MARGIN
     );
     // Fallback: bruk alle ikke-Pinnacle hvis alle har for høy margin
     const betSource = bettable.length > 0

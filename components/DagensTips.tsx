@@ -3,11 +3,15 @@ import { useState, useEffect, useCallback } from "react";
 import type { DagensTipsBet } from "@/app/api/scan/route";
 
 const BOOKMAKER_NAMES: Record<string, string> = {
-  nordicbet: "NordicBet",
-  betsson:   "Betsson",
-  betway:    "Betway",
-  pinnacle:  "Pinnacle",
-  boabet:    "BoaBet",
+  betsson:  "Betsson",
+  betway:   "Betway",
+  pinnacle: "Pinnacle (ref)",
+  boabet:   "BoaBet",
+};
+
+const BOOKMAKER_URLS: Record<string, string> = {
+  betsson: "https://www.betsson.com/nb",
+  betway:  "https://www.betway.com",
 };
 
 // BoaBet URL-struktur (fra devtools):
@@ -269,30 +273,40 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                       <p className={edgeColor(bet.edgePct)}>+{bet.edgePct}%</p>
                     </div>
                     {(() => {
-                      const eventId = findEventId(bet.homeTeam, bet.awayTeam, eventMap);
-                      const href    = eventId ? boaBetEventUrl(eventId) : boaBetHomeUrl();
-                      const label   = eventId ? "🦁 Bet direkte →" : "🦁 BoaBet →";
-                      const title   = eventId
-                        ? `Åpner kamp-siden direkte · ref-odds ${bet.odds.toFixed(2)} (${BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker})`
-                        : `Søk etter «${bet.homeTeam} – ${bet.awayTeam}» på BoaBet`;
+                      const eventId    = findEventId(bet.homeTeam, bet.awayTeam, eventMap);
+                      const boaHref    = eventId ? boaBetEventUrl(eventId) : boaBetHomeUrl();
+                      const boaLabel   = eventId ? "🦁 Bet direkte →" : "🦁 BoaBet →";
+                      const bkUrl      = BOOKMAKER_URLS[bet.bookmaker];
+                      const bkName     = BOOKMAKER_NAMES[bet.bookmaker] ?? bet.bookmaker;
                       return (
                         <div className="flex flex-col items-end gap-1">
                           <a
-                            href={href}
+                            href={boaHref}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500
                               text-white text-xs font-semibold transition-colors whitespace-nowrap"
-                            title={title}
+                            title={`Søk etter «${bet.homeTeam} – ${bet.awayTeam}» på BoaBet`}
                           >
-                            {label}
+                            {boaLabel}
                           </a>
+                          {bkUrl && (
+                            <a
+                              href={bkUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2 py-0.5 rounded text-[10px] border border-[#2a2d3a]
+                                text-[#94a3b8] hover:text-white hover:border-[#3a4060] transition-colors whitespace-nowrap"
+                              title={`Ref-odds ${bet.odds.toFixed(2)} hos ${bkName}`}
+                            >
+                              {bkName} {bet.odds.toFixed(2)} ↗
+                            </a>
+                          )}
                           <span className="text-[10px] text-[#64748b] whitespace-nowrap">
                             {eventId
                               ? <span className="text-green-500">✓ kamp funnet</span>
                               : <span className="text-amber-500">Søk: {bet.homeTeam.split(" ").pop()} – {bet.awayTeam.split(" ").pop()}</span>
                             }
-                            {" · "}{bet.odds.toFixed(2)} ref
                           </span>
                         </div>
                       );
