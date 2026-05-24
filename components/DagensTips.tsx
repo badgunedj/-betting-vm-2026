@@ -9,6 +9,24 @@ const BOOKMAKER_NAMES: Record<string, string> = {
   boabet:   "BoaBet",
 };
 
+/** Hvilken fane/marked du klikker på BoaBet for hvert market */
+const BOABET_MARKET_GUIDE: Record<string, string> = {
+  "Hjemmeseier (1)":    "Main → Win1",
+  "Uavgjort (X)":       "Main → X",
+  "Borteseier (2)":     "Main → Win2",
+  "Over 1.5 mål":       "Total → Over (1.5)",
+  "Under 1.5 mål":      "Total → Under (1.5)",
+  "Over 3.5 mål":       "Total → Over (3.5)",
+  "Under 3.5 mål":      "Total → Under (3.5)",
+  "BTTS Ja":            "Both Teams to Score → Yes",
+  "BTTS Nei":           "Both Teams to Score → No",
+  "Double Chance 1X":   "Double Chance → 1X",
+  "Double Chance X2":   "Double Chance → X2",
+  "Double Chance 12":   "Double Chance → 12",
+  "Draw No Bet Hjemme": "Draw No Bet → Hjemme",
+  "Draw No Bet Borte":  "Draw No Bet → Borte",
+};
+
 const BOOKMAKER_URLS: Record<string, string> = {
   betsson: "https://www.betsson.com/nb",
   betway:  "https://www.betway.com",
@@ -237,6 +255,11 @@ export default function DagensTips({ bankroll, sport = "eliteserien" }: { bankro
                       <span className="text-xs px-2 py-0.5 rounded-full bg-[#1e2235] text-[#94a3b8] whitespace-nowrap">
                         {bet.market}
                       </span>
+                      {BOABET_MARKET_GUIDE[bet.market] && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-[#1a2a1a] text-green-400 whitespace-nowrap">
+                          🦁 {BOABET_MARKET_GUIDE[bet.market]}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 text-xs text-[#64748b] flex-wrap">
                       <span>{formatKickoff(bet.commenceTime)}</span>

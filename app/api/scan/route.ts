@@ -65,19 +65,23 @@ export async function GET() {
       const pred = poissonPredict(eg.expectedHome, eg.expectedAway);
 
       // ── Alle markeder vi evaluerer ────────────────────────────────────────
+      // NB: Over/Under 2.5 er UTELATT — BoaBet tilbyr ikke dette markedet
+      // BoaBet-tilgjengelige markeder: 1X2, DC, DNB, Over/Under 1.5 og 3.5, BTTS, AH, CS
       const candidates: { market: string; ourProb: number; odds: number; bookmaker: string }[] = [
         { market: "Hjemmeseier (1)",  ourProb: pred.homeWin, odds: match.bestHomeWin.odds, bookmaker: match.bestHomeWin.bookmaker },
         { market: "Uavgjort (X)",     ourProb: pred.draw,    odds: match.bestDraw.odds,    bookmaker: match.bestDraw.bookmaker    },
         { market: "Borteseier (2)",   ourProb: pred.awayWin, odds: match.bestAwayWin.odds, bookmaker: match.bestAwayWin.bookmaker },
-        ...(match.bestOver25  ? [{ market: "Over 2.5 mål",       ourProb: pred.over25,  odds: match.bestOver25.odds,  bookmaker: match.bestOver25.bookmaker  }] : []),
-        ...(match.bestUnder25 ? [{ market: "Under 2.5 mål",      ourProb: pred.under25, odds: match.bestUnder25.odds, bookmaker: match.bestUnder25.bookmaker }] : []),
+        // Over/Under 1.5 og 3.5 — finnes på BoaBet
         ...(match.bestOver15  ? [{ market: "Over 1.5 mål",       ourProb: pred.over15,  odds: match.bestOver15.odds,  bookmaker: match.bestOver15.bookmaker  }] : []),
         ...(match.bestOver35  ? [{ market: "Over 3.5 mål",       ourProb: pred.over35,  odds: match.bestOver35.odds,  bookmaker: match.bestOver35.bookmaker  }] : []),
+        // BTTS — finnes på BoaBet ("Both Teams to Score")
         ...(match.bestBttsYes ? [{ market: "BTTS Ja",            ourProb: pred.bttsYes, odds: match.bestBttsYes.odds, bookmaker: match.bestBttsYes.bookmaker }] : []),
         ...(match.bestBttsNo  ? [{ market: "BTTS Nei",           ourProb: pred.bttsNo,  odds: match.bestBttsNo.odds,  bookmaker: match.bestBttsNo.bookmaker  }] : []),
+        // Double Chance — finnes på BoaBet
         ...(match.bestDc1X    ? [{ market: "Double Chance 1X",   ourProb: pred.dc1X,    odds: match.bestDc1X.odds,    bookmaker: match.bestDc1X.bookmaker    }] : []),
         ...(match.bestDcX2    ? [{ market: "Double Chance X2",   ourProb: pred.dcX2,    odds: match.bestDcX2.odds,    bookmaker: match.bestDcX2.bookmaker    }] : []),
         ...(match.bestDc12    ? [{ market: "Double Chance 12",   ourProb: pred.dc12,    odds: match.bestDc12.odds,    bookmaker: match.bestDc12.bookmaker    }] : []),
+        // Draw No Bet — finnes på BoaBet
         ...(match.bestDnbHome ? [{ market: "Draw No Bet Hjemme", ourProb: pred.dnbHome, odds: match.bestDnbHome.odds, bookmaker: match.bestDnbHome.bookmaker }] : []),
         ...(match.bestDnbAway ? [{ market: "Draw No Bet Borte",  ourProb: pred.dnbAway, odds: match.bestDnbAway.odds, bookmaker: match.bestDnbAway.bookmaker }] : []),
       ];
