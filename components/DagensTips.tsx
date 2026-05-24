@@ -9,20 +9,20 @@ const BOOKMAKER_NAMES: Record<string, string> = {
   boabet:   "BoaBet",
 };
 
-/** Hvilken fane/marked du klikker på BoaBet for hvert market */
+/** Navigeringsguide for BoaBet: hvilken fane du finner markedet under */
 const BOABET_MARKET_GUIDE: Record<string, string> = {
-  "Hjemmeseier (1)":    "Main → Win1",
-  "Uavgjort (X)":       "Main → X",
-  "Borteseier (2)":     "Main → Win2",
-  "Over 1.5 mål":       "Total → Over (1.5)",
-  "Under 1.5 mål":      "Total → Under (1.5)",
-  "Over 3.5 mål":       "Total → Over (3.5)",
-  "Under 3.5 mål":      "Total → Under (3.5)",
-  "BTTS Ja":            "Both Teams to Score → Yes",
-  "BTTS Nei":           "Both Teams to Score → No",
-  "Double Chance 1X":   "Double Chance → 1X",
-  "Double Chance X2":   "Double Chance → X2",
-  "Double Chance 12":   "Double Chance → 12",
+  "Hjemmeseier (1)":    "Velg «1» (hjemmeseier)",
+  "Uavgjort (X)":       "Velg «X» (uavgjort)",
+  "Borteseier (2)":     "Velg «2» (borteseier)",
+  "Over 1.5 mål":       "Total mål → Over 1.5",
+  "Under 1.5 mål":      "Total mål → Under 1.5",
+  "Over 3.5 mål":       "Total mål → Over 3.5",
+  "Under 3.5 mål":      "Total mål → Under 3.5",
+  "BTTS Ja":            "Begge lag scorer → Ja",
+  "BTTS Nei":           "Begge lag scorer → Nei",
+  "Double Chance 1X":   "Dobbel sjanse → 1X",
+  "Double Chance X2":   "Dobbel sjanse → X2",
+  "Double Chance 12":   "Dobbel sjanse → 12",
   "Draw No Bet Hjemme": "Draw No Bet → Hjemme",
   "Draw No Bet Borte":  "Draw No Bet → Borte",
 };
